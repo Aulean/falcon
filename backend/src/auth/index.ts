@@ -55,19 +55,20 @@ export const auth = betterAuth({
       stripeClient,
       stripeWebhookSecret,
       createCustomerOnSignUp: true,
-      // subscription: {
-      //   enabled: true,
-      //   plans: [
-      //     { name: 'basic', priceId: 'price_...', limits: { projects: 5, storage: 10 } },
-      //     { name: 'pro', priceId: 'price_...', limits: { projects: 20, storage: 50 }, freeTrial: { days: 14 } },
-      //   ],
-      //   // Example for org subscriptions authorization
-      //   // authorizeReference: async ({ user, referenceId, action }) => {
-      //   //   // TODO: Check the user's role in the organization identified by referenceId
-      //   //   // return true only if user can manage billing for that org (e.g., owner/admin)
-      //   //   return true;
-      //   // },
-      // },
+      subscription: {
+        enabled: true,
+        plans: [
+          // Add your actual Stripe price IDs here
+          // { name: 'basic', priceId: 'price_...', limits: { projects: 5, storage: 10 } },
+          // { name: 'pro', priceId: 'price_...', limits: { projects: 20, storage: 50 }, freeTrial: { days: 14 } },
+        ],
+        // Example for org subscriptions authorization
+        // authorizeReference: async ({ user, referenceId, action }) => {
+        //   // TODO: Check the user's role in the organization identified by referenceId
+        //   // return true only if user can manage billing for that org (e.g., owner/admin)
+        //   return true;
+        // },
+      },
     }),
   ],
 });

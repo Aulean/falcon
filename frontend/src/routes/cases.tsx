@@ -163,11 +163,6 @@ function CasesPage() {
           <Button size="sm" variant="outline">
             <Upload className="mr-2 size-4" /> Import
           </Button>
-          <Link to="/cases/new" preload={false}>
-            <Button size="sm" className="bg-teal-700 text-white hover:bg-teal-600">
-              <Plus className="mr-2 size-4" /> New Case
-            </Button>
-          </Link>
         </div>
       </div>
 

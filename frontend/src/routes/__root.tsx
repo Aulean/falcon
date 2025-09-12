@@ -1,17 +1,8 @@
-import { createRootRoute, Outlet, useNavigate } from '@tanstack/react-router'
+import { createRootRoute, Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import { useEffect } from 'react'
 import { AppSidebar } from '@/components/app-sidebar'
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
-import { Separator } from '@/components/ui/separator'
 import {
   SidebarInset,
   SidebarProvider,
@@ -22,6 +13,12 @@ import { Toaster } from 'sonner'
 
 const RootLayout = () => {
   const navigate = useNavigate()
+  const { location } = useRouterState()
+  
+  // Check if we're on home route
+  const isHomeRoute = location.pathname === '/'
+  // Check if we're on empty home (no session id suggests empty state)
+  const isEmptyHome = isHomeRoute && (!location.search || !location.search.sid)
 
   // Ensure there is always a session id in the URL
   useEffect(() => {
@@ -44,31 +41,22 @@ const RootLayout = () => {
         <header className="flex h-16 shrink-0 items-center gap-2 px-4 justify-between bg-background border-b">
           <div className="flex items-center gap-2">
             <SidebarTrigger className="-ml-1" />
-            <Separator
-              orientation="vertical"
-              className="mr-2 data-[orientation=vertical]:h-4"
-            />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#">
-                    Building Your Application
-                  </BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>Data Fetching</BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
           </div>
           <div className="ml-auto">
-            <Button variant="outline" size="sm" className="gap-1" onClick={startNewSession}>
-              <Plus className="size-3" /> New
-            </Button>
+            {location.pathname.startsWith('/cases') ? (
+              <Link to="/cases/new" preload={false}>
+                <Button size="sm" className="gap-1 bg-teal-700 text-white hover:bg-teal-600">
+                  <Plus className="size-3" /> New Case
+                </Button>
+              </Link>
+            ) : !isEmptyHome ? (
+              <Button variant="outline" size="sm" className="gap-1" onClick={startNewSession}>
+                <Plus className="size-3" /> New
+              </Button>
+            ) : null}
           </div>
         </header>
-        <div className="flex-1 min-h-0 overflow-hidden mx-auto w-full max-w-4xl">
+        <div className={`flex-1 min-h-0 ${isHomeRoute ? 'overflow-hidden mx-auto w-full max-w-4xl' : 'overflow-y-auto w-full px-6 pt-4'}`}>
           <Outlet />
         </div>
         <TanStackRouterDevtools />

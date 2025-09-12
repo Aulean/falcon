@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import aiRoutes from './src/routes/ai';
+import { aiRoutes } from './src/routes/ai';
 import billingRoutes from './src/routes/billing';
-import { auth, attachSession } from './src/auth/index';
+import { auth, attachSession } from './src/auth';
 
 const app = new Hono();
 
@@ -41,4 +41,3 @@ app.onError((err, c) => {
 app.notFound((c) => c.json({ error: 'Not Found' }, 404));
 
 export default app;
-

@@ -32,8 +32,8 @@ const SHOW_ADMIN = false
 
 const data = {
   user: {
-    name: "shadcn",
-    email: "m@example.com",
+    name: "Carlos",
+    email: "carlos@falcon.com",
     avatar: "/avatars/shadcn.jpg",
   },
   // Platform section
@@ -97,12 +97,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <Link to="/">
-                <div className="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg">
-<Feather className="size-4" />
+              <Link to="/" search={(prev) => ({ sid: prev?.sid || '' })}>
+                <div className="bg-white flex aspect-square size-8 items-center justify-center rounded-lg">
+<Feather className="size-4 text-teal-700" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">Acme Inc</span>
+                  <span className="truncate font-medium">Lawyer Up</span>
                   <span className="truncate text-xs">Enterprise</span>
                 </div>
               </Link>

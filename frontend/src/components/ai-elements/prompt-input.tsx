@@ -247,14 +247,45 @@ export const PromptInput = ({
 
   const matchesAccept = useCallback(
     (f: File) => {
-      if (!accept || accept.trim() === "") {
-        return true;
+      // No restriction when accept is empty
+      if (!accept || accept.trim() === "") return true;
+
+      const patterns = accept
+        .split(",")
+        .map((p) => p.trim().toLowerCase())
+        .filter(Boolean);
+
+      // File metadata
+      const type = (f.type || "").toLowerCase();
+      const name = (f.name || "").toLowerCase();
+
+      // Match against common accept patterns:
+      // - */* (any)
+      // - image/* (type wildcards)
+      // - application/pdf (exact MIME)
+      // - .pdf (extension)
+      // - pdf (extension w/o dot)
+      for (const p of patterns) {
+        if (p === "*/*") return true;
+
+        if (p.includes("/")) {
+          // MIME type
+          if (p.endsWith("/*")) {
+            const prefix = p.slice(0, p.indexOf("/"));
+            if (type.startsWith(prefix + "/")) return true;
+          } else {
+            if (type === p) return true;
+          }
+        } else if (p.startsWith(".")) {
+          // Extension with dot
+          if (name.endsWith(p)) return true;
+        } else {
+          // Bare extension
+          if (name.endsWith("." + p)) return true;
+        }
       }
-      // Simple check: if accept includes "image/*", filter to images; otherwise allow.
-      if (accept.includes("image/*")) {
-        return f.type.startsWith("image/");
-      }
-      return true;
+
+      return false;
     },
     [accept]
   );
@@ -441,7 +472,9 @@ export const PromptInput = ({
         )}
         onSubmit={handleSubmit}
         {...props}
-      />
+      >
+        {props.children}
+      </form>
     </AttachmentsContext.Provider>
   );
 };

@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { streamText, embed, tool, generateObject } from 'ai';
+import { streamText, embed, tool, generateObject, convertToModelMessages } from 'ai';
 import { z } from 'zod';
 import { azure } from '@lib/ai/azure';
 import { googleAI } from '@lib/ai/google';
@@ -19,6 +19,7 @@ router.post('/chat', async (c) => {
     const ct = c.req.header('content-type')?.toLowerCase() || '';
     let messages: any[] = [];
     let attachedFileUrls: { url: string; filename: string; contentType: string }[] = [];
+    const uploadedFiles: { base64: string; contentType: string; filename: string }[] = [];
 
     if (ct.includes('multipart/form-data')) {
       const form = await c.req.formData();
@@ -33,30 +34,33 @@ router.post('/chat', async (c) => {
         try { messages = JSON.parse(messagesStr); } catch { messages = []; }
       }
 
-      // Store files and expose local fetchable URLs for tools
+      // Convert uploaded files to base64 so tools can consume fileBase64 directly (no external bucket)
       const files = form.getAll('files');
-      const base = new URL(c.req.url);
       for (const f of files) {
         if (f instanceof File) {
-          const id = crypto.randomUUID();
-          const bytes = new Uint8Array(await f.arrayBuffer());
-          uploadStore.set(id, { bytes, contentType: f.type || 'application/octet-stream', filename: f.name || 'file' });
-          const url = `${base.origin}/api/ai/uploads/${id}`;
-          attachedFileUrls.push({ url, filename: f.name || 'file', contentType: f.type || 'application/octet-stream' });
+          const ab = await f.arrayBuffer();
+          const base64 = Buffer.from(ab).toString('base64');
+          uploadedFiles.push({ base64, contentType: f.type || 'application/pdf', filename: f.name || 'file.pdf' });
         }
       }
     } else {
       const body = await c.req.json().catch(() => ({}));
       messages = Array.isArray((body as any)?.messages) ? (body as any).messages : [];
-      // Accept attachments array in JSON
+      // Accept attachments array in JSON (fileUrl)
       const atts = Array.isArray((body as any)?.attachments) ? (body as any).attachments : [];
       attachedFileUrls = atts
         .map((a: any) => ({ url: String(a?.fileUrl || a?.url || ''), filename: String(a?.filename || 'file'), contentType: String(a?.contentType || 'application/octet-stream') }))
         .filter((a: any) => a.url);
     }
 
-    // If there are uploaded files, inform the model via a system message so it can call tools with fileUrl
-    if (attachedFileUrls.length > 0) {
+    // If there are uploaded files, inform the model how to call the tool
+    if (uploadedFiles.length > 0) {
+      messages.push({
+        role: 'system',
+        content:
+          `The user uploaded ${uploadedFiles.length} PDF file(s). To process them, call the highlightPdf tool. If you omit fileUrl and fileBase64, the tool will use the first uploaded PDF by default.`,
+      });
+    } else if (attachedFileUrls.length > 0) {
       const list = attachedFileUrls
         .map((f, i) => `${i + 1}. ${f.filename} (${f.contentType}) -> ${f.url}`)
         .join('\n');
@@ -68,6 +72,19 @@ router.post('/chat', async (c) => {
     }
 
     const model = azure('gpt-5-mini');
+
+    console.log('[chat] content-type:', ct, 'messages:', messages.length, 'uploadedFiles:', uploadedFiles.length, 'attachments:', attachedFileUrls.length);
+
+    // Convert incoming UI messages (with parts) to model messages expected by streamText
+    let modelMessages: any[];
+    try {
+      modelMessages = convertToModelMessages(messages as any);
+      console.log('[chat] converted messages to model format:', modelMessages.length);
+    } catch (err) {
+      console.error('[chat] message conversion error:', err instanceof Error ? err.message : String(err));
+      modelMessages = messages; // fallback to raw messages if conversion fails
+    }
+
     // Register tools for the model (function calling)
     const highlightPdfParams = z.object({
       // Provide either fileUrl or fileBase64
@@ -90,14 +107,24 @@ router.post('/chat', async (c) => {
       normalize: z.boolean().optional().default(false),
     });
 
+    const baseOrigin = new URL(c.req.url).origin;
     const highlightPdfTool = tool({
       description:
-        'Highlight regions on a PDF and return a new PDF as base64. Use when the user asks to mark, annotate, or highlight parts of a PDF.',
+        'Highlight regions on a PDF and return a downloadable link. Use when the user asks to mark, annotate, or highlight parts of a PDF.',
       inputSchema: highlightPdfParams,
       execute: async (
         { fileUrl, fileBase64, boxes, topLeft = false, normalize = false }: z.infer<typeof highlightPdfParams>,
       ) => {
         try {
+          console.log('[tool:highlightPdf] called with', {
+            hasFileUrl: Boolean(fileUrl),
+            hasFileBase64: Boolean(fileBase64),
+            uploadedFilesCount: uploadedFiles.length,
+            boxesCount: Array.isArray(boxes) ? boxes.length : 0,
+            topLeft,
+            normalize,
+          });
+
           let inputBytes: Uint8Array;
           if (fileBase64 && fileBase64.length > 0) {
             inputBytes = Buffer.from(fileBase64, 'base64');
@@ -106,20 +133,27 @@ router.post('/chat', async (c) => {
             if (!resp.ok) throw new Error(`Failed to fetch file from URL: ${resp.status}`);
             const ab = await resp.arrayBuffer();
             inputBytes = new Uint8Array(ab);
+          } else if (uploadedFiles.length > 0) {
+            inputBytes = Buffer.from(uploadedFiles[0].base64, 'base64');
           } else {
             throw new Error('Either fileUrl or fileBase64 must be provided');
           }
 
+          if (!boxes || boxes.length === 0) {
+            console.warn('[tool:highlightPdf] No boxes provided - returning note.');
+            return 'No highlight boxes were provided. Please specify rectangles or ask me to search for terms and compute boxes.';
+          }
+
           const out = await highlightPdf(inputBytes, boxes, { topLeft, normalize });
-          const pdfBase64 = Buffer.from(out).toString('base64');
-          return {
-            contentType: 'application/pdf',
-            pdfBase64,
-          };
+          const id = crypto.randomUUID();
+          uploadStore.set(id, { bytes: out, contentType: 'application/pdf', filename: 'highlighted.pdf' });
+          const url = `${baseOrigin}/api/ai/uploads/${id}`;
+          console.log('[tool:highlightPdf] generated highlighted PDF at', url, 'bytes:', out.length);
+          // Return a short string so the model can include it in the reply.
+          return `I generated a highlighted PDF. Download it here: ${url}`;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          // Log only message per user rule
-          console.error(msg);
+          console.error('[tool:highlightPdf] error', msg);
           throw new Error('PDF highlight tool failed');
         }
       },
@@ -129,13 +163,15 @@ router.post('/chat', async (c) => {
       model,
       messages: [
         { role: 'system', content: 'You can highlight PDFs using the highlightPdf tool. If the user wants a highlighted PDF, call highlightPdf with either a fileUrl or fileBase64 and the appropriate boxes.' },
-        ...messages,
+        ...modelMessages,
       ],
       tools: { highlightPdf: highlightPdfTool },
+      activeTools: ['highlightPdf'],
     });
 
-    // Return SSE UI message stream response (compatible with AI SDK UIs)
-    return result.toUIMessageStreamResponse();
+    console.log('[chat] started streaming');
+    const response = result.toUIMessageStreamResponse();
+    return response;
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     return c.json({ error: 'Failed to generate chat response' }, 500);
@@ -326,5 +362,5 @@ router.post('/pdf/highlight', async (c) => {
   }
 });
 
-export default router;
+export const aiRoutes = router;
 

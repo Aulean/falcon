@@ -121,11 +121,11 @@ body {
   --sidebar-ring: oklch(0.556 0 0);
 }
 
-/* Brand title font: Instrument Serif regular italic */
+/* Brand title font: Instrument Serif bold italic */
 .font-instrument-serif-italic {
   font-family: "Instrument Serif", serif;
   font-style: italic;
-  font-weight: 400;
+  font-weight: 700;
 }
 
 @layer base {
