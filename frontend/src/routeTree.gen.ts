@@ -15,8 +15,6 @@ import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WorkspaceNewRouteImport } from './routes/workspace.new'
 import { Route as WorkspaceCaseIdRouteImport } from './routes/workspace.$caseId'
-import { Route as CasesNewRouteImport } from './routes/cases.new'
-import { Route as CasesCaseIdRouteImport } from './routes/cases.$caseId'
 
 const WorkspacesRoute = WorkspacesRouteImport.update({
   id: '/workspaces',
@@ -48,24 +46,12 @@ const WorkspaceCaseIdRoute = WorkspaceCaseIdRouteImport.update({
   path: '/workspace/$caseId',
   getParentRoute: () => rootRouteImport,
 } as any)
-const CasesNewRoute = CasesNewRouteImport.update({
-  id: '/cases/new',
-  path: '/cases/new',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const CasesCaseIdRoute = CasesCaseIdRouteImport.update({
-  id: '/cases/$caseId',
-  path: '/cases/$caseId',
-  getParentRoute: () => rootRouteImport,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/pdf': typeof PdfRoute
   '/workspaces': typeof WorkspacesRoute
-  '/cases/$caseId': typeof CasesCaseIdRoute
-  '/cases/new': typeof CasesNewRoute
   '/workspace/$caseId': typeof WorkspaceCaseIdRoute
   '/workspace/new': typeof WorkspaceNewRoute
 }
@@ -74,8 +60,6 @@ export interface FileRoutesByTo {
   '/about': typeof AboutRoute
   '/pdf': typeof PdfRoute
   '/workspaces': typeof WorkspacesRoute
-  '/cases/$caseId': typeof CasesCaseIdRoute
-  '/cases/new': typeof CasesNewRoute
   '/workspace/$caseId': typeof WorkspaceCaseIdRoute
   '/workspace/new': typeof WorkspaceNewRoute
 }
@@ -85,8 +69,6 @@ export interface FileRoutesById {
   '/about': typeof AboutRoute
   '/pdf': typeof PdfRoute
   '/workspaces': typeof WorkspacesRoute
-  '/cases/$caseId': typeof CasesCaseIdRoute
-  '/cases/new': typeof CasesNewRoute
   '/workspace/$caseId': typeof WorkspaceCaseIdRoute
   '/workspace/new': typeof WorkspaceNewRoute
 }
@@ -97,8 +79,6 @@ export interface FileRouteTypes {
     | '/about'
     | '/pdf'
     | '/workspaces'
-    | '/cases/$caseId'
-    | '/cases/new'
     | '/workspace/$caseId'
     | '/workspace/new'
   fileRoutesByTo: FileRoutesByTo
@@ -107,8 +87,6 @@ export interface FileRouteTypes {
     | '/about'
     | '/pdf'
     | '/workspaces'
-    | '/cases/$caseId'
-    | '/cases/new'
     | '/workspace/$caseId'
     | '/workspace/new'
   id:
@@ -117,8 +95,6 @@ export interface FileRouteTypes {
     | '/about'
     | '/pdf'
     | '/workspaces'
-    | '/cases/$caseId'
-    | '/cases/new'
     | '/workspace/$caseId'
     | '/workspace/new'
   fileRoutesById: FileRoutesById
@@ -128,8 +104,6 @@ export interface RootRouteChildren {
   AboutRoute: typeof AboutRoute
   PdfRoute: typeof PdfRoute
   WorkspacesRoute: typeof WorkspacesRoute
-  CasesCaseIdRoute: typeof CasesCaseIdRoute
-  CasesNewRoute: typeof CasesNewRoute
   WorkspaceCaseIdRoute: typeof WorkspaceCaseIdRoute
   WorkspaceNewRoute: typeof WorkspaceNewRoute
 }
@@ -178,20 +152,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceCaseIdRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/cases/new': {
-      id: '/cases/new'
-      path: '/cases/new'
-      fullPath: '/cases/new'
-      preLoaderRoute: typeof CasesNewRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/cases/$caseId': {
-      id: '/cases/$caseId'
-      path: '/cases/$caseId'
-      fullPath: '/cases/$caseId'
-      preLoaderRoute: typeof CasesCaseIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -200,8 +160,6 @@ const rootRouteChildren: RootRouteChildren = {
   AboutRoute: AboutRoute,
   PdfRoute: PdfRoute,
   WorkspacesRoute: WorkspacesRoute,
-  CasesCaseIdRoute: CasesCaseIdRoute,
-  CasesNewRoute: CasesNewRoute,
   WorkspaceCaseIdRoute: WorkspaceCaseIdRoute,
   WorkspaceNewRoute: WorkspaceNewRoute,
 }
