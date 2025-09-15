@@ -440,8 +440,7 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
   onRemoveHighlight,
   phrases,
   searchCaseSensitive,
-  searchWholeWord,
-  activeMatchIndex,
+  searchWholeWord
 }: {
   pageNumber: number
   drawMode: DrawMode

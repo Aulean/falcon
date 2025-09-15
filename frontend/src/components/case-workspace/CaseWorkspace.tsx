@@ -1,14 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate, Link } from '@tanstack/react-router'
+import { Link } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { toast } from 'sonner'
-import { ArrowLeft, FileText, Link as LinkIcon, NotebookPen } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 
 import type { CaseWorkspaceFormValues } from '@/lib/case-workspace-types'
-import { createCase, getCase, updateCase, presignDocumentUpload, uploadToPresignedUrl, registerUploadedDocument } from '@/lib/case-workspace-api'
+import { getCase, updateCase, presignDocumentUpload, uploadToPresignedUrl, registerUploadedDocument } from '@/lib/case-workspace-api'
 
-import { CaseHeader } from './CaseHeader'
-// import { CaseDetails } from './CaseDetails'
 import { LegalReferences } from './LegalReferences'
 import { DocumentsUpload } from './DocumentsUpload'
 import { CaseChat } from './CaseChat'
@@ -18,18 +16,15 @@ import { HeroHeader } from './HeroHeader'
 import { InfoChips } from './InfoChips'
 import { LinkDialog } from './LinkDialog'
 
-export interface CaseWorkspaceProps {
-  mode: 'create' | 'view'
-  caseId?: string
-}
+export type CaseWorkspaceProps =
+  | { mode: 'view'; caseId: string }
+  | { mode: 'create'; caseId?: string }
 
 export function CaseWorkspace({ mode, caseId }: CaseWorkspaceProps) {
-  const navigate = useNavigate()
   const [isLoading, setIsLoading] = useState(mode === 'view')
-  const [isSaving, setIsSaving] = useState(false)
-  const [autoCreated, setAutoCreated] = useState(false)
+ 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [isDragging, setIsDragging] = useState(false)
+  const [_, setIsDragging] = useState(false)
   const [caseData, setCaseData] = useState<CaseWorkspaceFormValues>({
     title: '',
     description: '',
@@ -70,23 +65,6 @@ export function CaseWorkspace({ mode, caseId }: CaseWorkspaceProps) {
     }
   }
 
-  async function handleCreateCase() {
-    if (!caseData.title.trim()) {
-      toast.error('Please enter a workspace title')
-      return
-    }
-
-    try {
-      setIsSaving(true)
-      const updated = await updateCase(caseId!, caseData)
-      toast.success('Saved')
-      navigate({ to: '/workspace/$caseId', params: { caseId: updated.id || caseId! } })
-    } catch (err) {
-      toast.error('Failed to save')
-    } finally {
-      setIsSaving(false)
-    }
-  }
 
   async function handleUpdateField(field: keyof CaseWorkspaceFormValues, value: any) {
     if (mode === 'create') {
@@ -106,7 +84,7 @@ export function CaseWorkspace({ mode, caseId }: CaseWorkspaceProps) {
   }
 
   const isCreateMode = mode === 'create'
-  const canUseAdvancedFeatures = !isCreateMode && caseId
+  const canUseAdvancedFeatures = !isCreateMode && !!caseId
 
   // No longer auto-create here; handled by /workspace/new route to avoid duplicate creations
   // (left intentionally empty)

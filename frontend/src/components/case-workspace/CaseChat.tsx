@@ -7,17 +7,17 @@ import {
 } from '@/components/ai-elements/prompt-input'
 
 import { Button } from '@/components/ui/button'
-import { Paperclip, Globe, Clock, Mic, Waves } from 'lucide-react'
+import { Paperclip, Globe, Waves } from 'lucide-react'
 
 interface CaseChatProps {
-  caseId: string
+  caseId?: string
   showActionRow?: boolean
   onAddFiles?: () => void
   onAddLinks?: () => void
   onAddInstructions?: () => void
 }
 
-export function CaseChat({ caseId, showActionRow, onAddFiles, onAddLinks, onAddInstructions }: CaseChatProps) {
+export function CaseChat({ showActionRow, onAddFiles, onAddLinks, onAddInstructions }: CaseChatProps) {
   return (
     <div>
       {/* Action row like the reference screenshot */}

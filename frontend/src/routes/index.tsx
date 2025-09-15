@@ -145,7 +145,7 @@ function ChatPage() {
   const [caseId, setCaseId] = useState<string | undefined>(undefined)
   const [sessionId, setSessionId] = useState<string>('')
   const [reaction, setReaction] = useState<'like' | 'dislike' | null>(null)
-  const [hoveredAssistantIndex, setHoveredAssistantIndex] = useState<number | null>(null) // reserved for hover effects
+  const [_, setHoveredAssistantIndex] = useState<number | null>(null) // reserved for hover effects
   const [copied, setCopied] = useState(false)
   const [prompt, setPrompt] = useState('')
   
