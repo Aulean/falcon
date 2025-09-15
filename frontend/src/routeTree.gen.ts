@@ -9,15 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as CasesRouteImport } from './routes/cases'
+import { Route as WorkspacesRouteImport } from './routes/workspaces'
+import { Route as PdfRouteImport } from './routes/pdf'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as WorkspaceNewRouteImport } from './routes/workspace.new'
+import { Route as WorkspaceCaseIdRouteImport } from './routes/workspace.$caseId'
 import { Route as CasesNewRouteImport } from './routes/cases.new'
 import { Route as CasesCaseIdRouteImport } from './routes/cases.$caseId'
 
-const CasesRoute = CasesRouteImport.update({
-  id: '/cases',
-  path: '/cases',
+const WorkspacesRoute = WorkspacesRouteImport.update({
+  id: '/workspaces',
+  path: '/workspaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PdfRoute = PdfRouteImport.update({
+  id: '/pdf',
+  path: '/pdf',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AboutRoute = AboutRouteImport.update({
@@ -30,60 +38,116 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkspaceNewRoute = WorkspaceNewRouteImport.update({
+  id: '/workspace/new',
+  path: '/workspace/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspaceCaseIdRoute = WorkspaceCaseIdRouteImport.update({
+  id: '/workspace/$caseId',
+  path: '/workspace/$caseId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CasesNewRoute = CasesNewRouteImport.update({
-  id: '/new',
-  path: '/new',
-  getParentRoute: () => CasesRoute,
+  id: '/cases/new',
+  path: '/cases/new',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const CasesCaseIdRoute = CasesCaseIdRouteImport.update({
-  id: '/$caseId',
-  path: '/$caseId',
-  getParentRoute: () => CasesRoute,
+  id: '/cases/$caseId',
+  path: '/cases/$caseId',
+  getParentRoute: () => rootRouteImport,
 } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/cases': typeof CasesRouteWithChildren
+  '/pdf': typeof PdfRoute
+  '/workspaces': typeof WorkspacesRoute
   '/cases/$caseId': typeof CasesCaseIdRoute
   '/cases/new': typeof CasesNewRoute
+  '/workspace/$caseId': typeof WorkspaceCaseIdRoute
+  '/workspace/new': typeof WorkspaceNewRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/cases': typeof CasesRouteWithChildren
+  '/pdf': typeof PdfRoute
+  '/workspaces': typeof WorkspacesRoute
   '/cases/$caseId': typeof CasesCaseIdRoute
   '/cases/new': typeof CasesNewRoute
+  '/workspace/$caseId': typeof WorkspaceCaseIdRoute
+  '/workspace/new': typeof WorkspaceNewRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
-  '/cases': typeof CasesRouteWithChildren
+  '/pdf': typeof PdfRoute
+  '/workspaces': typeof WorkspacesRoute
   '/cases/$caseId': typeof CasesCaseIdRoute
   '/cases/new': typeof CasesNewRoute
+  '/workspace/$caseId': typeof WorkspaceCaseIdRoute
+  '/workspace/new': typeof WorkspaceNewRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/about' | '/cases' | '/cases/$caseId' | '/cases/new'
+  fullPaths:
+    | '/'
+    | '/about'
+    | '/pdf'
+    | '/workspaces'
+    | '/cases/$caseId'
+    | '/cases/new'
+    | '/workspace/$caseId'
+    | '/workspace/new'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/about' | '/cases' | '/cases/$caseId' | '/cases/new'
-  id: '__root__' | '/' | '/about' | '/cases' | '/cases/$caseId' | '/cases/new'
+  to:
+    | '/'
+    | '/about'
+    | '/pdf'
+    | '/workspaces'
+    | '/cases/$caseId'
+    | '/cases/new'
+    | '/workspace/$caseId'
+    | '/workspace/new'
+  id:
+    | '__root__'
+    | '/'
+    | '/about'
+    | '/pdf'
+    | '/workspaces'
+    | '/cases/$caseId'
+    | '/cases/new'
+    | '/workspace/$caseId'
+    | '/workspace/new'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
-  CasesRoute: typeof CasesRouteWithChildren
+  PdfRoute: typeof PdfRoute
+  WorkspacesRoute: typeof WorkspacesRoute
+  CasesCaseIdRoute: typeof CasesCaseIdRoute
+  CasesNewRoute: typeof CasesNewRoute
+  WorkspaceCaseIdRoute: typeof WorkspaceCaseIdRoute
+  WorkspaceNewRoute: typeof WorkspaceNewRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/cases': {
-      id: '/cases'
-      path: '/cases'
-      fullPath: '/cases'
-      preLoaderRoute: typeof CasesRouteImport
+    '/workspaces': {
+      id: '/workspaces'
+      path: '/workspaces'
+      fullPath: '/workspaces'
+      preLoaderRoute: typeof WorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/pdf': {
+      id: '/pdf'
+      path: '/pdf'
+      fullPath: '/pdf'
+      preLoaderRoute: typeof PdfRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/about': {
@@ -100,39 +164,46 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/workspace/new': {
+      id: '/workspace/new'
+      path: '/workspace/new'
+      fullPath: '/workspace/new'
+      preLoaderRoute: typeof WorkspaceNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workspace/$caseId': {
+      id: '/workspace/$caseId'
+      path: '/workspace/$caseId'
+      fullPath: '/workspace/$caseId'
+      preLoaderRoute: typeof WorkspaceCaseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/cases/new': {
       id: '/cases/new'
-      path: '/new'
+      path: '/cases/new'
       fullPath: '/cases/new'
       preLoaderRoute: typeof CasesNewRouteImport
-      parentRoute: typeof CasesRoute
+      parentRoute: typeof rootRouteImport
     }
     '/cases/$caseId': {
       id: '/cases/$caseId'
-      path: '/$caseId'
+      path: '/cases/$caseId'
       fullPath: '/cases/$caseId'
       preLoaderRoute: typeof CasesCaseIdRouteImport
-      parentRoute: typeof CasesRoute
+      parentRoute: typeof rootRouteImport
     }
   }
 }
 
-interface CasesRouteChildren {
-  CasesCaseIdRoute: typeof CasesCaseIdRoute
-  CasesNewRoute: typeof CasesNewRoute
-}
-
-const CasesRouteChildren: CasesRouteChildren = {
-  CasesCaseIdRoute: CasesCaseIdRoute,
-  CasesNewRoute: CasesNewRoute,
-}
-
-const CasesRouteWithChildren = CasesRoute._addFileChildren(CasesRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
-  CasesRoute: CasesRouteWithChildren,
+  PdfRoute: PdfRoute,
+  WorkspacesRoute: WorkspacesRoute,
+  CasesCaseIdRoute: CasesCaseIdRoute,
+  CasesNewRoute: CasesNewRoute,
+  WorkspaceCaseIdRoute: WorkspaceCaseIdRoute,
+  WorkspaceNewRoute: WorkspaceNewRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

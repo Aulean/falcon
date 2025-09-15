@@ -313,7 +313,7 @@ function CaseDetailsPage() {
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {/* Status - change directly from chip */}
             <Select value={form.status} onValueChange={(v) => saveField('status', v as any)}>
-              <SelectTrigger className="h-7 rounded-full border px-2 text-xs text-muted-foreground hover:bg-accent w-auto">
+            <SelectTrigger className="h-9 rounded-full border px-3 text-sm text-muted-foreground hover:bg-accent w-auto">
                 <SelectValue placeholder="Set status" />
               </SelectTrigger>
               <SelectContent>
@@ -323,26 +323,26 @@ function CaseDetailsPage() {
               </SelectContent>
             </Select>
             {/* Case number */}
-            <button type="button" className="h-7 rounded-full border px-2 text-xs text-muted-foreground hover:bg-accent" onClick={() => setEditKey('caseNumber')}>
+            <button type="button" className="h-9 rounded-full border px-3 text-sm text-muted-foreground hover:bg-accent" onClick={() => setEditKey('caseNumber')}>
               <span className="inline-flex items-center gap-1">
-                <Hash className="size-3" /> {form.caseNumber?.trim() || 'Add number'}
+                <Hash className="size-4" /> {form.caseNumber?.trim() || 'Add number'}
               </span>
             </button>
             {/* Court */}
-            <button type="button" className="h-7 rounded-full border px-2 text-xs text-muted-foreground hover:bg-accent" onClick={() => setEditKey('court')}>
+            <button type="button" className="h-9 rounded-full border px-3 text-sm text-muted-foreground hover:bg-accent" onClick={() => setEditKey('court')}>
               <span className="inline-flex items-center gap-1">
-                <Gavel className="size-3" /> {form.court || 'Select court'}
+                <Gavel className="size-4" /> {form.court || 'Select court'}
               </span>
             </button>
             {/* Opened on (instead of next hearing) */}
-            <button type="button" className="h-7 rounded-full border px-2 text-xs text-muted-foreground hover:bg-accent" onClick={() => setEditKey('openedAt')}>
+            <button type="button" className="h-9 rounded-full border px-3 text-sm text-muted-foreground hover:bg-accent" onClick={() => setEditKey('openedAt')}>
               <span className="inline-flex items-center gap-1">
-                <CalendarClock className="size-3" /> {form.openedAt ? new Date(form.openedAt).toLocaleDateString() : 'Opened on'}
+                <CalendarClock className="size-4" /> {form.openedAt ? new Date(form.openedAt).toLocaleDateString() : 'Opened on'}
               </span>
             </button>
             {/* Practice area */}
             <Select value={form.practiceArea} onValueChange={(v) => saveField('practiceArea', v as any)}>
-              <SelectTrigger className="h-7 rounded-full border px-2 text-xs text-muted-foreground hover:bg-accent w-auto">
+            <SelectTrigger className="h-9 rounded-full border px-3 text-sm text-muted-foreground hover:bg-accent w-auto">
                 <SelectValue placeholder="Practice area" />
               </SelectTrigger>
               <SelectContent>
@@ -354,7 +354,7 @@ function CaseDetailsPage() {
             {/* People assigned */}
             {assignees.length > 0 && (
               <div className="ml-2 inline-flex items-center gap-1">
-                <UsersIcon className="size-3 text-muted-foreground" />
+                <UsersIcon className="size-4 text-muted-foreground" />
                 <div className="-space-x-2 flex">
                   {assignees.slice(0, 4).map((p) => (
                     <Avatar key={p.id} className="size-6 border">

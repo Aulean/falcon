@@ -28,8 +28,8 @@ import {
   PromptInputSubmit,
 } from '@/components/ai-elements/prompt-input'
 
-export const Route = createFileRoute('/cases')({
-  component: CasesPage,
+export const Route = createFileRoute('/workspaces')({
+  component: WorkspacesPage,
 })
 
 // --- Types & Mock Data ---
@@ -111,7 +111,7 @@ const statusColors: Record<CaseStatus, string> = {
   Closed: 'bg-emerald-100 text-emerald-800 border-emerald-200',
 }
 
-function CasesPage() {
+function WorkspacesPage() {
   const [search, setSearch] = useState('')
   const [status, setStatus] = useState<CaseStatus | 'All'>('All')
   const [jurisdiction, setJurisdiction] = useState<string | 'All'>('All')
@@ -119,7 +119,7 @@ function CasesPage() {
   const [chatCase, setChatCase] = useState<Case | null>(null)
 
   const { location } = useRouterState()
-  const isChild = location.pathname !== '/cases'
+  const isChild = location.pathname !== '/workspaces'
 
   const jurisdictions = useMemo(
     () => Array.from(new Set(MOCK_CASES.map((c) => c.jurisdiction))).sort(),
@@ -154,15 +154,10 @@ function CasesPage() {
       {/* Page header */}
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Cases</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Workspaces</h1>
           <p className="text-sm text-muted-foreground">
-            Create and manage cases. Search across general law, office documents, and case assets.
+            Create and manage workspaces. Search across general law, office documents, and case assets.
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline">
-            <Upload className="mr-2 size-4" /> Import
-          </Button>
         </div>
       </div>
 
@@ -173,7 +168,7 @@ function CasesPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search cases, clients, tags..."
+            placeholder="Search workspaces, clients, tags..."
             className="pl-8 w-64"
           />
         </div>
@@ -289,9 +284,14 @@ function CasesPage() {
                   Updated {new Date(c.updatedAt).toLocaleDateString()}
                 </div>
                 <div className="flex items-center gap-2">
-                  <Link to={`/cases/${c.id}`} preload={false}>
+                  <Link to="/workspace/$caseId" params={{ caseId: c.id }} preload={false}>
                     <Button size="sm" variant="outline">
                       Open
+                    </Button>
+                  </Link>
+                  <Link to="/workspace/$caseId" params={{ caseId: c.id }} preload={false}>
+                    <Button size="sm" variant="outline">
+                      Workspace
                     </Button>
                   </Link>
                   <Button
@@ -343,7 +343,7 @@ function CasesPage() {
                 }}
               >
                 <PromptInputBody>
-                  <PromptInputTextarea placeholder="Ask about this case…" />
+                  <PromptInputTextarea placeholder="Ask about this workspace…" />
                   <PromptInputToolbar>
                     <div className="ml-auto">
                       <PromptInputSubmit className="bg-teal-700 text-white hover:bg-teal-600" />
@@ -357,7 +357,7 @@ function CasesPage() {
       </Sheet>
         </>
       )}
-      {/* Nested routes render here (e.g., /cases/new) */}
+      {/* Nested routes render here (e.g., /workspace/new) */}
       <Outlet />
     </div>
   )
@@ -370,17 +370,17 @@ function EmptyCasesState({ onCreate }: { onCreate: () => void }) {
         <div className="mx-auto mb-6 flex size-12 items-center justify-center rounded-full bg-muted">
           <BriefIcon />
         </div>
-        <h2 className="text-xl font-semibold">Create your first case</h2>
+        <h2 className="text-xl font-semibold">Create your first workspace</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Organize documents, collaborate with your team, and chat with the case context.
+          Organize documents, collaborate with your team, and chat with the workspace context.
         </p>
         <div className="mt-6 flex items-center justify-center gap-3">
           <Button variant="outline">
             <Upload className="mr-2 size-4" /> Import
           </Button>
-          <Link to="/cases/new" preload={false}>
+          <Link to="/workspace/new" preload={false}>
             <Button className="bg-teal-700 text-white hover:bg-teal-600">
-              <Plus className="mr-2 size-4" /> New Case
+              <Plus className="mr-2 size-4" /> New Workspace
             </Button>
           </Link>
         </div>
@@ -402,4 +402,3 @@ function BriefIcon() {
     </svg>
   )
 }
-

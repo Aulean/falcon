@@ -28,6 +28,27 @@ app.on(['POST', 'GET'], '/api/auth/*', (c) => {
 // AI routes mounted at /api/ai
 app.route('/api/ai', aiRoutes);
 
+// Generic proxy mounted at /api/proxy (mirror of /api/ai/proxy)
+app.get('/api/proxy', async (c) => {
+  try {
+    const url = String(new URL(c.req.url).searchParams.get('url') ?? '')
+    if (!url) return c.json({ error: 'url is required' }, 400)
+    const resp = await fetch(url)
+    const ab = await resp.arrayBuffer()
+    const ct = resp.headers.get('content-type') || 'application/octet-stream'
+    return new Response(ab, {
+      status: resp.status,
+      headers: {
+        'Content-Type': ct,
+        'Cache-Control': 'no-store',
+      },
+    })
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err))
+    return c.json({ error: 'Proxy failed' }, 500)
+  }
+})
+
 // Billing routes mounted at /api/billing (seat management & usage)
 app.route('/api/billing', billingRoutes);
 

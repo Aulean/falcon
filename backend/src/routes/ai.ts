@@ -6,6 +6,7 @@ import { googleAI } from '@lib/ai/google';
 import { openai } from '@ai-sdk/openai';
 import { PDFDocument, rgb } from 'pdf-lib';
 import { highlightPdf } from '@lib/pdf/highlight';
+import { extractPdfText } from '@lib/pdf/text';
 
 const router = new Hono();
 
@@ -100,8 +101,9 @@ router.post('/chat', async (c) => {
             height: z.number(),
           }),
         )
+        .optional()
         .describe(
-          'List of rectangles to highlight. Coordinates in PDF points from bottom-left unless topLeft=true. If normalize=true, treat values as percentages [0..1].',
+          'Optional list of rectangles to highlight. If omitted or empty, a default highlight is added near the top area of page 1. Coordinates in PDF points from bottom-left unless topLeft=true. If normalize=true, treat values as percentages [0..1].',
         ),
       topLeft: z.boolean().optional().default(false),
       normalize: z.boolean().optional().default(false),
@@ -134,23 +136,32 @@ router.post('/chat', async (c) => {
             const ab = await resp.arrayBuffer();
             inputBytes = new Uint8Array(ab);
           } else if (uploadedFiles.length > 0) {
-            inputBytes = Buffer.from(uploadedFiles[0].base64, 'base64');
+            const firstFile = uploadedFiles[0];
+            if (!firstFile) {
+              throw new Error('No uploaded file found');
+            }
+            inputBytes = Buffer.from(firstFile.base64, 'base64');
           } else {
             throw new Error('Either fileUrl or fileBase64 must be provided');
           }
 
-          if (!boxes || boxes.length === 0) {
-            console.warn('[tool:highlightPdf] No boxes provided - returning note.');
-            return 'No highlight boxes were provided. Please specify rectangles or ask me to search for terms and compute boxes.';
-          }
+          // Default highlight box if none provided
+          const needsDefault = !boxes || boxes.length === 0;
+          const defaultBoxes = [
+            // normalized coords relative to top-left
+            { page: 0, x: 0.1, y: 0.1, width: 0.3, height: 0.06 },
+          ];
+          const boxesToUse = needsDefault ? defaultBoxes : boxes!;
+          const topLeftToUse = needsDefault ? true : topLeft;
+          const normalizeToUse = needsDefault ? true : normalize;
 
-          const out = await highlightPdf(inputBytes, boxes, { topLeft, normalize });
+          const out = await highlightPdf(inputBytes, boxesToUse, { topLeft: topLeftToUse, normalize: normalizeToUse });
           const id = crypto.randomUUID();
           uploadStore.set(id, { bytes: out, contentType: 'application/pdf', filename: 'highlighted.pdf' });
           const url = `${baseOrigin}/api/ai/uploads/${id}`;
           console.log('[tool:highlightPdf] generated highlighted PDF at', url, 'bytes:', out.length);
           // Return a short string so the model can include it in the reply.
-          return `I generated a highlighted PDF. Download it here: ${url}`;
+          return `I generated a highlighted PDF${needsDefault ? ' with a default highlight' : ''}. Download it here: ${url}`;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           console.error('[tool:highlightPdf] error', msg);
@@ -276,6 +287,81 @@ router.post('/embeddings', async (c) => {
   }
 });
 
+// Simple proxy to bypass remote CORS when loading PDFs in the browser
+// GET /api/ai/proxy?url=ENCODED_URL
+router.get('/proxy', async (c) => {
+  try {
+    const url = String(c.req.query('url') ?? '')
+    if (!url) return c.json({ error: 'url is required' }, 400)
+    const resp = await fetch(url)
+    const ab = await resp.arrayBuffer()
+    const ct = resp.headers.get('content-type') || 'application/octet-stream'
+    return new Response(ab, {
+      status: resp.status,
+      headers: {
+        'Content-Type': ct,
+        'Cache-Control': 'no-store',
+      },
+    })
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err))
+    return c.json({ error: 'Proxy failed' }, 500)
+  }
+})
+
+// POST /api/ai/pdf/positions
+// Accepts either JSON or multipart/form-data:
+// JSON: { url?: string, phrases?: string[], caseSensitive?: boolean, wholeWord?: boolean }
+// multipart: file + phrases (JSON array string)
+// Returns: { boxes: [{ page, x, y, w, h }], normalize: true, topLeft: true }
+router.post('/pdf/positions', async (c) => {
+  try {
+    const ct = c.req.header('content-type')?.toLowerCase() || ''
+    let bytes: Uint8Array | null = null
+    let phrases: string[] = []
+    let caseSensitive = false
+    let wholeWord = false
+
+    if (ct.includes('multipart/form-data')) {
+      const form = await c.req.formData()
+      const f = form.get('file')
+      if (f instanceof File) {
+        bytes = new Uint8Array(await f.arrayBuffer())
+      }
+      const p = form.get('phrases')
+      if (typeof p === 'string' && p.trim()) {
+        try { phrases = JSON.parse(p) } catch { phrases = [] }
+      }
+      caseSensitive = String(form.get('caseSensitive') ?? '').toLowerCase() === 'true'
+      wholeWord = String(form.get('wholeWord') ?? '').toLowerCase() === 'true'
+    } else if (ct.includes('application/json')) {
+      const body = await c.req.json()
+      const url = String(body?.url ?? '')
+      phrases = Array.isArray(body?.phrases) ? body.phrases.map((s: any) => String(s)) : []
+      caseSensitive = Boolean(body?.caseSensitive)
+      wholeWord = Boolean(body?.wholeWord)
+      if (url) {
+        const resp = await fetch(url)
+        if (!resp.ok) return c.json({ error: 'failed to fetch url' }, 400)
+        const ab = await resp.arrayBuffer()
+        bytes = new Uint8Array(ab)
+      }
+    }
+
+    if (!bytes) return c.json({ error: 'No PDF provided' }, 400)
+    if (!phrases.length) return c.json({ boxes: [], normalize: true, topLeft: true })
+
+    const { findTextPositions } = await import('@lib/pdf/positions')
+    const { boxes } = await findTextPositions(bytes, phrases, { caseSensitive, wholeWord })
+
+    return c.json({ boxes, normalize: true, topLeft: true })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[positions] error:', msg)
+    return c.json({ error: 'Failed to compute positions', message: msg }, 500)
+  }
+})
+
 // POST /api/ai/pdf/highlight
 // Accepts multipart/form-data with fields:
 // - file: PDF file (required)
@@ -284,6 +370,95 @@ router.post('/embeddings', async (c) => {
 // - topLeft: '1' | 'true' to interpret y from top-left (optional)
 // - normalize: '1' | 'true' to treat x,y,width,height as percentages [0..1] (optional)
 // Returns: application/pdf with highlighted rectangles drawn.
+// POST /api/ai/pdf/find
+// JSON: { url?: string, prompt: string }
+// multipart: file + prompt
+// Response: { phrases: string[], caseSensitive?: boolean, wholeWord?: boolean }
+router.post('/pdf/find', async (c) => {
+  try {
+    const ct = c.req.header('content-type')?.toLowerCase() || ''
+    let prompt = ''
+    let bytes: Uint8Array | null = null
+    if (ct.includes('multipart/form-data')) {
+      const form = await c.req.formData()
+      const f = form.get('file')
+      if (f instanceof File) {
+        bytes = new Uint8Array(await f.arrayBuffer())
+      }
+      prompt = String(form.get('prompt') ?? '')
+    } else if (ct.includes('application/json')) {
+      const body = await c.req.json()
+      prompt = String(body?.prompt ?? '')
+      const url = String(body?.url ?? '')
+      if (url) {
+        const resp = await fetch(url)
+        if (!resp.ok) return c.json({ error: 'failed to fetch url' }, 400)
+        const ab = await resp.arrayBuffer()
+        bytes = new Uint8Array(ab)
+      }
+    }
+
+    const InputSchema = z.object({ prompt: z.string().min(4) })
+    const parsed = InputSchema.safeParse({ prompt })
+    if (!parsed.success) return c.json({ error: 'invalid input' }, 400)
+    if (!bytes) return c.json({ error: 'No PDF provided' }, 400)
+
+    const OutputSchema = z.object({
+      phrases: z.array(z.string().min(1)).min(1),
+      caseSensitive: z.boolean().optional().default(false),
+      wholeWord: z.boolean().optional().default(false),
+    })
+
+    const hasOpenAI = Boolean(Bun.env.OPENAI_API_KEY)
+
+    let payload: { phrases: string[]; caseSensitive?: boolean; wholeWord?: boolean }
+
+    if (hasOpenAI) {
+      // Use file input with OpenAI 4o-mini for best results
+      const base64 = Buffer.from(bytes).toString('base64')
+      const dataUrl = `data:application/pdf;base64,${base64}`
+      const system = `You find short literal phrases inside a PDF. Return only JSON matching { phrases: string[]; caseSensitive?: boolean; wholeWord?: boolean }.
+- Phrases must literally occur in the provided PDF. Keep them 1-5 words when possible. No regex.`
+      const result = await generateObject({
+        model: openai('gpt-4o-mini'),
+        schema: OutputSchema,
+        messages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: system + `\n\nUser request: ${prompt}` },
+              { type: 'file', data: dataUrl, mediaType: 'application/pdf' },
+            ],
+          },
+        ],
+      })
+      const validated = OutputSchema.safeParse(result.object)
+      if (!validated.success) return c.json({ error: 'model output validation failed' }, 500)
+      payload = validated.data
+    } else {
+      // Fallback: extract text and use Azure (or any configured text model) with JSON schema
+      const text = await extractPdfText(bytes, 18000)
+      const system = `You help users locate relevant phrases inside a PDF. Given the user's request and the document text, return short literal phrases that appear in the PDF which, when highlighted, answer the user's request. Output only JSON matching this TypeScript type:\n{ phrases: string[]; caseSensitive?: boolean; wholeWord?: boolean }\n- Keep phrases short, ideally 1-5 words, and ensure they literally occur in the text.\n- Prefer fewer phrases that best satisfy the request.\n- Do not include regex or special characters. Use literal text.`
+      const result = await generateObject({
+        model: azure('gpt-5-mini'),
+        schema: OutputSchema,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: `User request: ${prompt}\n\nDocument text (truncated):\n${text}` },
+        ],
+      })
+      const validated = OutputSchema.safeParse(result.object)
+      if (!validated.success) return c.json({ error: 'model output validation failed' }, 500)
+      payload = validated.data
+    }
+
+    return c.json(payload)
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err))
+    return c.json({ error: 'Failed to find phrases' }, 500)
+  }
+})
+
 router.post('/pdf/highlight', async (c) => {
   try {
     const form = await c.req.formData();

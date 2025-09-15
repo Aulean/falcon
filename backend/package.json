@@ -29,7 +29,7 @@
     "drizzle-orm": "^0.44.5",
     "hono": "^4.9.6",
     "pdf-lib": "^1.17.1",
-    "pdfjs-dist": "^3.11.174",
+    "pdfjs-dist": "^5.4.149",
     "postgres": "^3.4.7",
     "resend": "^6.0.3",
     "stripe": "^18.0.0",

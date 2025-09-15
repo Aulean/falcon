@@ -21,11 +21,16 @@ const RootLayout = () => {
   const isEmptyHome = isHomeRoute && (!location.search || !location.search.sid)
 
   // Ensure there is always a session id in the URL
+  // Preserve the current path on refresh; only update the search params
   useEffect(() => {
     const usp = new URLSearchParams(window.location.search)
     if (!usp.get('sid')) {
       const sid = 's_' + Math.random().toString(36).slice(2, 10)
-      navigate({ to: '/', search: (prev: any) => ({ ...(prev ?? {}), sid }), replace: true })
+      navigate({
+        // Stay on the current route, just add sid to the query string
+        search: (prev: any) => ({ ...(prev ?? {}), sid }),
+        replace: true,
+      })
     }
   }, [navigate])
 
@@ -43,10 +48,10 @@ const RootLayout = () => {
             <SidebarTrigger className="-ml-1" />
           </div>
           <div className="ml-auto">
-            {location.pathname.startsWith('/cases') ? (
-              <Link to="/cases/new" preload={false}>
+            {location.pathname.startsWith('/workspaces') ? (
+              <Link to="/workspace/new" preload={false}>
                 <Button size="sm" className="gap-1 bg-teal-700 text-white hover:bg-teal-600">
-                  <Plus className="size-3" /> New Case
+                  <Plus className="size-3" /> New Workspace
                 </Button>
               </Link>
             ) : !isEmptyHome ? (

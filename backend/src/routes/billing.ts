@@ -116,7 +116,8 @@ router.post('/usage/pages', async (c) => {
       if (!pageItem) return c.json({ error: 'Failed to attach metered page item' }, 500);
     }
 
-    await stripeClient.subscriptionItems.createUsageRecord(pageItem.id, {
+    // Use the documented API; cast to any to work around TS typing gaps in this Stripe version
+    await (stripeClient.subscriptionItems as any).createUsageRecord(pageItem.id, {
       quantity: qty,
       action: 'increment',
       timestamp: Math.floor(Date.now() / 1000),

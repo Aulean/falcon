@@ -45,9 +45,14 @@ const data = {
       isActive: true,
     },
     {
-      title: "Cases",
-      url: "/cases",
+      title: "Workspaces",
+      url: "/workspaces",
       icon: BriefcaseBusiness,
+    },
+    {
+      title: "PDF",
+      url: "/pdf",
+      icon: FileText,
     },
     {
       title: "Documentation",

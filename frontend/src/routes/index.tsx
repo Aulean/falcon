@@ -5,7 +5,6 @@ import { DefaultChatTransport } from 'ai'
 import {
   Conversation,
   ConversationContent,
-  ConversationEmptyState,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
 import { Message, MessageAvatar, MessageContent } from '@/components/ai-elements/message'
@@ -19,10 +18,6 @@ import {
   PromptInputTextarea,
   PromptInputToolbar,
   PromptInputTools,
-  PromptInputActionMenu,
-  PromptInputActionMenuTrigger,
-  PromptInputActionMenuContent,
-  PromptInputActionMenuItem,
   PromptInputSubmit,
   PromptInputAttachments,
   PromptInputAttachment,
@@ -91,13 +86,13 @@ function SubmitOrMic({ inputValue, isLoading, onStop }: { inputValue?: string; i
     return (
       <Button
         type="button"
-        variant="default"
+        variant="outline"
         size="icon"
         onClick={onStop}
-        className="gap-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white border-0 shadow-none focus-visible:ring-2 focus-visible:ring-red-600"
+        className="gap-1.5 rounded-lg border border-red-200 text-red-600 bg-white hover:bg-red-50 shadow-none focus-visible:ring-2 focus-visible:ring-red-300"
         aria-label="Stop"
       >
-        <div className="size-3 bg-white rounded-sm" />
+        <div className="size-3 bg-red-600 rounded-sm" />
       </Button>
     )
   }
@@ -350,15 +345,8 @@ onSubmit={(msg) => {
                   </div>
                 ) : (
                   <Message key={m.id || i} from={m.role}>
-                    <MessageAvatar src={'/feather.svg'} name={'You'} />
                     <MessageContent>
-                      {/* Show user content, trying both content and parts */}
-                      {m.content && <span>{m.content}</span>}
-                      {(m.parts || [])
-                        .filter(p => p.type === 'text')
-                        .map((p, idx) => (
-                          <span key={idx}>{(p as any).text}</span>
-                        ))}
+                      {extractTextFromMessage(m)}
                     </MessageContent>
                   </Message>
                 );
