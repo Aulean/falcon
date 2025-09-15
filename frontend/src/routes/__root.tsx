@@ -1,4 +1,4 @@
-import { createRootRoute, Link, Outlet, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
+import { createRootRoute, Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router'
 import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 import { useEffect } from 'react'
 import { AppSidebar } from '@/components/app-sidebar'
@@ -10,16 +10,15 @@ import {
 } from '@/components/ui/sidebar'
 import { Plus } from 'lucide-react'
 import { Toaster } from 'sonner'
+import { z } from 'zod'
 
 const RootLayout = () => {
   const navigate = useNavigate()
   const { location } = useRouterState()
-  const search = useSearch({ from: '/' })
-  
   // Check if we're on home route
   const isHomeRoute = location.pathname === '/'
   // Check if we're on empty home (no session id suggests empty state)
-  const isEmptyHome = isHomeRoute && !search?.sid
+  const isEmptyHome = isHomeRoute && !new URLSearchParams(location.search).get('sid')
 
   // Ensure there is always a session id in the URL
   // Preserve the current path on refresh; only update the search params
@@ -28,8 +27,8 @@ const RootLayout = () => {
     if (!usp.get('sid')) {
       const sid = 's_' + Math.random().toString(36).slice(2, 10)
       navigate({
+        to: '.',
         // Stay on the current route, just add sid to the query string
-        to: '/',
         search: { sid },
         replace: true,
       })
@@ -73,4 +72,10 @@ const RootLayout = () => {
   )
 }
 
-export const Route = createRootRoute({ component: RootLayout })
+export const Route = createRootRoute({
+  component: RootLayout,
+  // Type and validate the root search params so search updaters are inferred correctly
+  validateSearch: z.object({
+    sid: z.string().optional(),
+  }),
+})

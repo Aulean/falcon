@@ -285,22 +285,10 @@ function WorkspacesPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   <Link to="/workspace/$caseId" params={{ caseId: c.id }} preload={false}>
-                    <Button size="sm" variant="outline">
+                    <Button size="sm" className="bg-teal-700 text-white hover:bg-teal-600">
                       Open
                     </Button>
                   </Link>
-                  <Link to="/workspace/$caseId" params={{ caseId: c.id }} preload={false}>
-                    <Button size="sm" variant="outline">
-                      Workspace
-                    </Button>
-                  </Link>
-                  <Button
-                    size="sm"
-                    className="bg-teal-700 text-white hover:bg-teal-600"
-                    onClick={() => setChatCase(c)}
-                  >
-                    <MessageSquare className="mr-2 size-4" /> Chat
-                  </Button>
                 </div>
               </CardFooter>
             </Card>

@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
@@ -138,7 +138,7 @@ function extractTextFromMessage(m: any): string {
 }
 
 function ChatPage() {
-  const navigate = useNavigate()
+  const navigate = Route.useNavigate()
   const search = Route.useSearch()
   const [mode, setMode] = useState<'retrieval' | 'qa' | 'fact'>('qa')
   const [isDragging, setIsDragging] = useState(false)
@@ -198,7 +198,8 @@ function ChatPage() {
     let sid = search.sid
     if (!sid) {
       sid = 's_' + Math.random().toString(36).slice(2, 10)
-      navigate({ to: '/', search: { ...search, sid }, replace: true })
+      // Preserve current location; only add sid
+      navigate({ search: (prev) => ({ ...prev, sid }), replace: true })
     }
     setSessionId(sid)
 
