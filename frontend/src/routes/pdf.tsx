@@ -4,7 +4,7 @@ import { Document, Page, pdfjs } from 'react-pdf'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
-import { Trash2, MousePointer2, Hand, Upload, Link as LinkIcon, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Search } from 'lucide-react'
+import { Trash2, MousePointer2, Hand, Upload, Link as LinkIcon, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Search, Download } from 'lucide-react'
 
 // react-pdf / pdfjs worker setup
 // Use CDN worker that matches the API version to avoid mismatches across nested deps
@@ -36,7 +36,15 @@ interface RectNorm {
   source?: 'manual' | 'auto'
 }
 
-type DrawMode = 'pan' | 'draw'
+interface NoteAnn {
+  id: string
+  page: number
+  x: number
+  y: number
+  text: string
+}
+
+type DrawMode = 'pan' | 'draw' | 'note'
 
 function PdfRoute() {
   const DEFAULT_PDF_URL = 'https://www.uncfsu.edu/assets/Documents/Broadwell%20College%20of%20Business%20and%20Economics/legal.pdf'
@@ -48,6 +56,7 @@ function PdfRoute() {
   const [highlights, setHighlights] = useState<RectNorm[]>([])
   const [drawMode, setDrawMode] = useState<DrawMode>('draw')
   const [zoom, setZoom] = useState<number>(1)
+  const [notes, setNotes] = useState<NoteAnn[]>([])
 
   // Measured width of the viewer area (outside of react-pdf to avoid feedback loops)
   const viewerRef = useRef<HTMLDivElement | null>(null)
@@ -145,6 +154,10 @@ function PdfRoute() {
   }, [])
 
   const clearHighlights = () => setHighlights((_) => _.filter((r) => r.page !== pageNumber))
+  const addNote = useCallback((n: NoteAnn) => setNotes((prev) => [...prev, n]), [])
+  const updateNote = useCallback((id: string, text: string) => setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, text } : n))), [])
+  const removeNote = useCallback((id: string) => setNotes((prev) => prev.filter((n) => n.id !== id)), [])
+  const clearNotes = () => setNotes((_) => _.filter((n) => n.page !== pageNumber))
 
   const goPrev = () => setPageNumber((p) => Math.max(1, p - 1))
   const goNext = () => setPageNumber((p) => Math.min(numPages || 1, p + 1))
@@ -155,6 +168,8 @@ function PdfRoute() {
   const [wholeWord, setWholeWord] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isAiLoading, setIsAiLoading] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [exportAllPages, setExportAllPages] = useState(false)
 
   // Imperative handle to talk to the page
   const pageHandleRef = useRef<any>(null)
@@ -287,6 +302,127 @@ function PdfRoute() {
     }
   }
 
+  // Utilities for exporting
+  function parseRgba(color?: string): { r: number; g: number; b: number; a: number } {
+    // default yellow
+    const fallback = { r: 1, g: 0.905, b: 0.451, a: 0.42 }
+    if (!color) return fallback
+    // rgba(r, g, b, a) or rgb(r, g, b)
+    const m = color.match(/rgba?\(([^)]+)\)/i)
+    if (!m) return fallback
+    const parts = m[1].split(',').map((s) => parseFloat(s.trim()))
+    const [r, g, b, a] = [parts[0] ?? 255, parts[1] ?? 231, parts[2] ?? 115, parts[3] ?? 0.42]
+    return { r: Math.min(1, Math.max(0, r / 255)), g: Math.min(1, Math.max(0, g / 255)), b: Math.min(1, Math.max(0, b / 255)), a: Math.min(1, Math.max(0, a)) }
+  }
+
+  async function gatherRectsForExport(fullDocument = true): Promise<Record<number, { width: number; height: number; rects: { x: number; y: number; w: number; h: number; color?: string }[] }>> {
+    const out: Record<number, { width: number; height: number; rects: { x: number; y: number; w: number; h: number; color?: string }[] }> = {}
+    // Include manual highlights from state (all pages)
+    // We'll insert manual rectangles later per page after we know each page's text-layer dims
+    // Include phrase highlights by visiting pages and reading visible <mark> rects
+    if (activePhrases && activePhrases.length && pageHandleRef.current?.getVisibleMarkRects) {
+      const original = pageNumber
+      const start = fullDocument ? 1 : pageNumber
+      const end = fullDocument ? (numPages || 1) : pageNumber
+      for (let p = start; p <= end; p++) {
+        setPageNumber(p)
+        const ok = await waitForPageReady()
+        if (!ok) continue
+        const ext = pageHandleRef.current.getVisibleMarkRectsExt?.()
+        const width = ext?.width || 0
+        const height = ext?.height || 0
+        if (!out[p]) out[p] = { width, height, rects: [] }
+        // phrase marks in px
+        const rects = (ext?.rects || []) as { x: number; y: number; w: number; h: number }[]
+        for (const r of rects) out[p].rects.push({ ...r, color: 'rgba(255,231,115,0.42)' })
+        await sleep(0)
+      }
+      setPageNumber(original)
+    }
+    // Now add manual highlights scaled by each page's dims
+    for (const h of highlights) {
+      const pg = h.page
+      if (!out[pg]) continue
+      const { width, height } = out[pg]
+      if (!width || !height) continue
+      out[pg].rects.push({ x: h.x * width, y: h.y * height, w: h.w * width, h: h.h * height, color: h.color })
+    }
+    return out
+  }
+
+  async function exportPdfWithHighlights() {
+    try {
+      setIsExporting(true)
+      // Load original PDF bytes
+      let pdfBytes: ArrayBuffer | null = null
+      if (fileObj) {
+        pdfBytes = await fileObj.arrayBuffer()
+      } else if (urlInput.trim()) {
+        const res = await fetch(proxied(urlInput.trim()))
+        if (!res.ok) throw new Error('Failed to fetch PDF')
+        pdfBytes = await res.arrayBuffer()
+      }
+      if (!pdfBytes) throw new Error('No PDF source to export')
+
+      const rectsByPage = await gatherRectsForExport(exportAllPages)
+      const worker = new Worker(new URL('../workers/pdfExport.worker.ts', import.meta.url), { type: 'module' })
+      // group notes by page
+      const notesByPage: Record<number, { x: number; y: number; text: string }[]> = {}
+      for (const n of notes) {
+        if (!notesByPage[n.page]) notesByPage[n.page] = []
+        notesByPage[n.page].push({ x: n.x, y: n.y, text: n.text })
+      }
+      const payload = {
+        pdfBytes,
+        pages: rectsByPage,
+        notesByPage,
+        filename: 'document-with-highlights.pdf',
+      }
+
+      const result: ArrayBuffer = await new Promise((resolve, reject) => {
+        let settled = false
+        const settle = (fn: Function, arg?: any) => {
+          if (settled) return
+          settled = true
+          try { worker.terminate() } catch {}
+          fn(arg)
+        }
+        worker.onmessage = (ev) => {
+          const msg = ev.data || {}
+          if (msg.ok && msg.data) {
+            settle(resolve, msg.data as ArrayBuffer)
+          } else {
+            settle(reject, new Error(msg.error || 'Export failed'))
+          }
+        }
+        worker.onerror = (e) => {
+          settle(reject, new Error(String((e as any).message || 'Worker error')))
+        }
+        // Transfer the pdf bytes to the worker to avoid copying
+        const buf = pdfBytes as ArrayBuffer
+        worker.postMessage(payload, [buf])
+      })
+
+      const blob = new Blob([result], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'document-with-highlights.pdf'
+      a.rel = 'noopener'
+      a.style.display = 'none'
+      document.body.appendChild(a)
+      a.click()
+      setTimeout(() => {
+        URL.revokeObjectURL(url)
+        a.remove()
+      }, 2000)
+    } catch (err) {
+      console.error(err instanceof Error ? err.message : String(err))
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   return (
     <div className="flex flex-col h-full w-full gap-3 p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -325,9 +461,26 @@ function PdfRoute() {
           <Button variant={drawMode === 'pan' ? 'default' : 'outline'} size="sm" onClick={() => setDrawMode('pan')}>
             <Hand className="size-4 mr-1" /> Pan
           </Button>
+          <Button variant={drawMode === 'note' ? 'default' : 'outline'} size="sm" onClick={() => setDrawMode('note')}>
+            <span className="mr-1">🗒️</span> Note
+          </Button>
           <Button variant="outline" size="sm" onClick={clearHighlights}>
             <Trash2 className="size-4 mr-1" /> Clear Page Highlights
           </Button>
+          <Button variant="outline" size="sm" onClick={clearNotes}>
+            <Trash2 className="size-4 mr-1" /> Clear Page Notes
+          </Button>
+          <Button variant="default" size="sm" onClick={exportPdfWithHighlights} disabled={isExporting || !source} title="Download PDF with highlights" className="bg-teal-700 text-white hover:bg-teal-600">
+            {isExporting ? (
+              <span className="inline-flex items-center gap-1"><span className="inline-block size-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Export</span>
+            ) : (
+              <><Download className="size-4 mr-1" /> Download</>
+            )}
+          </Button>
+          <label className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
+            <input type="checkbox" checked={exportAllPages} onChange={(e) => setExportAllPages(e.target.checked)} disabled={isExporting} />
+            All pages (slower)
+          </label>
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-2">
@@ -422,6 +575,10 @@ function PdfRoute() {
               searchCaseSensitive={caseSensitive}
               searchWholeWord={wholeWord}
               activeMatchIndex={matchIndex}
+              notes={notes.filter((n) => n.page === pageNumber)}
+              onAddNote={(n) => addNote(n)}
+              onUpdateNote={updateNote}
+              onRemoveNote={removeNote}
             />
           </Document>
         )}
@@ -440,7 +597,12 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
   onRemoveHighlight,
   phrases,
   searchCaseSensitive,
-  searchWholeWord
+  searchWholeWord,
+  activeMatchIndex,
+  notes,
+  onAddNote,
+  onUpdateNote,
+  onRemoveNote
 }: {
   pageNumber: number
   drawMode: DrawMode
@@ -453,6 +615,10 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
   searchCaseSensitive: boolean
   searchWholeWord: boolean
   activeMatchIndex: number // reserved for active ring styling
+  notes: NoteAnn[]
+  onAddNote: (n: NoteAnn) => void
+  onUpdateNote: (id: string, text: string) => void
+  onRemoveNote: (id: string) => void
 }, ref: React.Ref<any>) {
   const pageWrapRef = useRef<HTMLDivElement | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -461,10 +627,23 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
 
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false)
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
   const [previewRect, setPreviewRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
 
   const onMouseDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    if (drawMode === 'note') {
+      const overlay = overlayRef.current
+      if (!overlay) return
+      const rect = overlay.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const y = e.clientY - rect.top
+      const { clientWidth: W, clientHeight: H } = overlay
+      const id = 'n_' + Math.random().toString(36).slice(2, 9)
+      onAddNote({ id, page: pageNumber, x: x / W, y: y / H, text: '' })
+      setEditingNoteId(id)
+      return
+    }
     if (drawMode !== 'draw') return
     const overlay = overlayRef.current
     if (!overlay) return
@@ -542,6 +721,40 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
           m.style.outline = ''
         }
       })
+    },
+    getVisibleMarkRects() {
+      const tl = pageWrapRef.current?.querySelector('.react-pdf__Page__textContent') as HTMLElement | null
+      if (!tl) return [] as { x: number; y: number; w: number; h: number }[]
+      const tlRect = tl.getBoundingClientRect()
+      const marks = Array.from(tl.querySelectorAll('mark[data-pdfmark="1"]')) as HTMLElement[]
+      const out: { x: number; y: number; w: number; h: number }[] = []
+      for (const m of marks) {
+        for (const r of Array.from(m.getClientRects())) {
+          const x = (r.left - tlRect.left) / tlRect.width
+          const y = (r.top - tlRect.top) / tlRect.height
+          const w = r.width / tlRect.width
+          const h = r.height / tlRect.height
+          if (isFinite(x) && isFinite(y) && isFinite(w) && isFinite(h) && w > 0 && h > 0) out.push({ x, y, w, h })
+        }
+      }
+      return out
+    },
+    getVisibleMarkRectsExt() {
+      const tl = pageWrapRef.current?.querySelector('.react-pdf__Page__textContent') as HTMLElement | null
+      if (!tl) return { width: 0, height: 0, rects: [] as { x: number; y: number; w: number; h: number }[] }
+      const tlRect = tl.getBoundingClientRect()
+      const marks = Array.from(tl.querySelectorAll('mark[data-pdfmark="1"]')) as HTMLElement[]
+      const rects: { x: number; y: number; w: number; h: number }[] = []
+      for (const m of marks) {
+        for (const r of Array.from(m.getClientRects())) {
+          const x = r.left - tlRect.left
+          const y = r.top - tlRect.top
+          const w = r.width
+          const h = r.height
+          if (isFinite(x) && isFinite(y) && isFinite(w) && isFinite(h) && w > 0 && h > 0) rects.push({ x, y, w, h })
+        }
+      }
+      return { width: tlRect.width, height: tlRect.height, rects }
     },
     // Legacy: keep for compatibility if needed by callers
     findPhrases(phrases: string[], opts: { caseSensitive?: boolean; wholeWord?: boolean } = {}) {
@@ -716,6 +929,28 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
               const fix = (v: number) => Math.max(0, Math.min(1, v))
               return renderHighlightDiv({ ...h, x: fix(h.x), y: fix(h.y), w: fix(h.w), h: fix(h.h) })
             })}
+
+          {/* Notes */}
+          {notes.map((n) => (
+            <div key={n.id} className="absolute" style={{ left: `${n.x * 100}%`, top: `${n.y * 100}%` }}>
+              <button
+                className="px-1 py-0.5 text-xs rounded bg-yellow-200/80 border border-yellow-400 shadow"
+                onClick={(e) => { e.stopPropagation(); setEditingNoteId(n.id) }}
+                title={n.text || 'Add note'}
+              >
+                🗒️
+              </button>
+              {editingNoteId === n.id && (
+                <div className="absolute z-10 mt-1 w-64 rounded border bg-white shadow p-2">
+                  <textarea defaultValue={n.text} className="w-full h-24 text-sm border rounded p-1" onKeyDown={(e) => { if (e.key === 'Escape') setEditingNoteId(null) }} />
+                  <div className="mt-1 flex items-center gap-2 justify-end">
+                    <Button size="sm" variant="outline" onClick={() => { onRemoveNote(n.id); setEditingNoteId(null) }}>Delete</Button>
+                    <Button size="sm" onClick={(e) => { const ta = (e.currentTarget.parentElement?.previousSibling as HTMLTextAreaElement); onUpdateNote(n.id, ta?.value || ''); setEditingNoteId(null) }}>Save</Button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
 
           {/* Preview while drawing */}
           {previewRect && (
