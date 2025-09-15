@@ -168,7 +168,8 @@ function PdfRoute() {
   const [wholeWord, setWholeWord] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isAiLoading, setIsAiLoading] = useState(false)
-  const [isExporting, setIsExporting] = useState(false)
+  const [isExporting, setIsExporting] = useState<boolean>(false)
+  const [exportProgress, setExportProgress] = useState<string>('')
   const [exportAllPages, setExportAllPages] = useState(false)
 
   // Imperative handle to talk to the page
@@ -317,42 +318,92 @@ function PdfRoute() {
 
   async function gatherRectsForExport(fullDocument = true): Promise<Record<number, { width: number; height: number; rects: { x: number; y: number; w: number; h: number; color?: string }[] }>> {
     const out: Record<number, { width: number; height: number; rects: { x: number; y: number; w: number; h: number; color?: string }[] }> = {}
-    // Include manual highlights from state (all pages)
-    // We'll insert manual rectangles later per page after we know each page's text-layer dims
-    // Include phrase highlights by visiting pages and reading visible <mark> rects
-    if (activePhrases && activePhrases.length && pageHandleRef.current?.getVisibleMarkRects) {
-      const original = pageNumber
-      const start = fullDocument ? 1 : pageNumber
-      const end = fullDocument ? (numPages || 1) : pageNumber
-      for (let p = start; p <= end; p++) {
-        setPageNumber(p)
-        const ok = await waitForPageReady()
-        if (!ok) continue
+    
+    if (fullDocument) {
+      // For full document export, we'll primarily rely on manual highlights
+      // and avoid the fragile DOM-based phrase highlight extraction that causes race conditions
+      
+      // Standard page dimensions in PDF points (approximate for common formats)
+      // We'll use a reasonable default since we can't reliably get text layer dimensions for all pages
+      const defaultPageDimensions = { width: 595, height: 842 } // A4 in PDF points
+      
+      // Add manual highlights for all pages  
+      for (const h of highlights) {
+        const pg = h.page
+        if (!out[pg]) {
+          out[pg] = { width: defaultPageDimensions.width, height: defaultPageDimensions.height, rects: [] }
+        }
+        // Convert normalized coordinates to PDF points
+        // Note: normalized coordinates are relative to page (0-1), but Y starts from top
+        // PDF coordinates have Y starting from bottom, so we need to flip Y
+        const pdfX = h.x * defaultPageDimensions.width
+        const pdfW = h.w * defaultPageDimensions.width
+        const pdfH = h.h * defaultPageDimensions.height
+        const pdfY = defaultPageDimensions.height - (h.y * defaultPageDimensions.height) - pdfH
+        
+        out[pg].rects.push({
+          x: pdfX,
+          y: pdfY,
+          w: pdfW,
+          h: pdfH,
+          color: h.color
+        })
+      }
+      
+      // Only get phrase highlights from current page to avoid DOM issues
+      if (activePhrases && activePhrases.length && pageHandleRef.current?.getVisibleMarkRects) {
+        const ext = pageHandleRef.current.getVisibleMarkRectsExt?.()
+        if (ext && ext.width && ext.height) {
+          const currentPage = pageNumber
+          if (!out[currentPage]) {
+            out[currentPage] = { width: ext.width, height: ext.height, rects: [] }
+          } else {
+            // Update dimensions if we have better data
+            out[currentPage].width = ext.width
+            out[currentPage].height = ext.height
+          }
+          
+          const rects = (ext.rects || []) as { x: number; y: number; w: number; h: number }[]
+          for (const r of rects) {
+            out[currentPage].rects.push({ ...r, color: 'rgba(255,231,115,0.42)' })
+          }
+        }
+      }
+    } else {
+      // Single page export - use the reliable method
+      if (activePhrases && activePhrases.length && pageHandleRef.current?.getVisibleMarkRects) {
         const ext = pageHandleRef.current.getVisibleMarkRectsExt?.()
         const width = ext?.width || 0
         const height = ext?.height || 0
-        if (!out[p]) out[p] = { width, height, rects: [] }
-        // phrase marks in px
+        if (!out[pageNumber]) out[pageNumber] = { width, height, rects: [] }
+        
         const rects = (ext?.rects || []) as { x: number; y: number; w: number; h: number }[]
-        for (const r of rects) out[p].rects.push({ ...r, color: 'rgba(255,231,115,0.42)' })
-        await sleep(0)
+        for (const r of rects) out[pageNumber].rects.push({ ...r, color: 'rgba(255,231,115,0.42)' })
       }
-      setPageNumber(original)
+      
+      // Add manual highlights for current page
+      for (const h of highlights.filter(h => h.page === pageNumber)) {
+        if (!out[pageNumber]) {
+          out[pageNumber] = { width: 595, height: 842, rects: [] } // fallback dimensions
+        }
+        const { width, height } = out[pageNumber]
+        out[pageNumber].rects.push({ 
+          x: h.x * width, 
+          y: h.y * height, 
+          w: h.w * width, 
+          h: h.h * height, 
+          color: h.color 
+        })
+      }
     }
-    // Now add manual highlights scaled by each page's dims
-    for (const h of highlights) {
-      const pg = h.page
-      if (!out[pg]) continue
-      const { width, height } = out[pg]
-      if (!width || !height) continue
-      out[pg].rects.push({ x: h.x * width, y: h.y * height, w: h.w * width, h: h.h * height, color: h.color })
-    }
+    
     return out
   }
 
   async function exportPdfWithHighlights() {
     try {
       setIsExporting(true)
+      setExportProgress('')
       // Load original PDF bytes
       let pdfBytes: ArrayBuffer | null = null
       if (fileObj) {
@@ -364,19 +415,35 @@ function PdfRoute() {
       }
       if (!pdfBytes) throw new Error('No PDF source to export')
 
-      const rectsByPage = await gatherRectsForExport(exportAllPages)
-      const worker = new Worker(new URL('../workers/pdfExport.worker.ts', import.meta.url), { type: 'module' })
-      // group notes by page
+      // Group notes by page
       const notesByPage: Record<number, { x: number; y: number; text: string }[]> = {}
       for (const n of notes) {
         if (!notesByPage[n.page]) notesByPage[n.page] = []
         notesByPage[n.page].push({ x: n.x, y: n.y, text: n.text })
       }
-      const payload = {
-        pdfBytes,
-        pages: rectsByPage,
-        notesByPage,
-        filename: 'document-with-highlights.pdf',
+
+      let worker: Worker
+      let payload: any
+
+      if (exportAllPages) {
+        // Use full-document worker with pdfjs-dist inside the worker (no UI DOM dependency)
+        worker = new Worker(new URL('../workers/pdfExportFull.worker.ts', import.meta.url), { type: 'module' })
+        payload = {
+          phrases: activePhrases || [],
+          searchOptions: { caseSensitive, wholeWord },
+          manualHighlights: highlights,
+          notesByPage,
+          filename: 'document-with-highlights.pdf',
+        }
+      } else {
+        // Use simple worker for current page only (faster, more reliable)
+        const rectsByPage = await gatherRectsForExport(false)
+        worker = new Worker(new URL('../workers/pdfExport.worker.ts', import.meta.url), { type: 'module' })
+        payload = {
+          pages: rectsByPage,
+          notesByPage,
+          filename: 'document-with-highlights.pdf',
+        }
       }
 
       const result: ArrayBuffer = await new Promise((resolve, reject) => {
@@ -387,20 +454,36 @@ function PdfRoute() {
           try { worker.terminate() } catch {}
           fn(arg)
         }
+        
         worker.onmessage = (ev) => {
-          const msg = ev.data || {}
-          if (msg.ok && msg.data) {
-            settle(resolve, msg.data as ArrayBuffer)
-          } else {
-            settle(reject, new Error(msg.error || 'Export failed'))
+          try {
+            const msg = ev.data || {}
+            if (msg.progress) {
+              setExportProgress(msg.progress)
+            } else if (msg.ok && msg.data) {
+              settle(resolve, msg.data as ArrayBuffer)
+            } else {
+              settle(reject, new Error(msg.error || 'Export failed'))
+            }
+          } catch (msgErr) {
+            settle(reject, new Error(`Message handling error: ${msgErr}`))
           }
         }
+        
         worker.onerror = (e) => {
-          settle(reject, new Error(String((e as any).message || 'Worker error')))
+          const error = e.error || e.message || 'Worker error'
+          console.error('Worker error event:', e)
+          settle(reject, new Error(`Worker error: ${error}`))
         }
-        // Transfer the pdf bytes to the worker to avoid copying
-        const buf = pdfBytes as ArrayBuffer
-        worker.postMessage(payload, [buf])
+        
+        try {
+          // Add pdfBytes to payload and transfer the ArrayBuffer
+          const buf = (pdfBytes as ArrayBuffer).slice()
+          payload.pdfBytes = buf
+          worker.postMessage(payload, [buf])
+        } catch (postErr) {
+          settle(reject, new Error(`Failed to send message to worker: ${postErr}`))
+        }
       })
 
       const blob = new Blob([result], { type: 'application/pdf' })
@@ -417,9 +500,14 @@ function PdfRoute() {
         a.remove()
       }, 2000)
     } catch (err) {
-      console.error(err instanceof Error ? err.message : String(err))
+      console.error('Export error:', err)
+      // Show user-friendly error message
+      const errorMsg = err instanceof Error ? err.message : String(err)
+      setExportProgress(`Error: ${errorMsg}`)
+      setTimeout(() => setExportProgress(''), 3000)
     } finally {
       setIsExporting(false)
+      setExportProgress('')
     }
   }
 
@@ -472,14 +560,17 @@ function PdfRoute() {
           </Button>
           <Button variant="default" size="sm" onClick={exportPdfWithHighlights} disabled={isExporting || !source} title="Download PDF with highlights" className="bg-teal-700 text-white hover:bg-teal-600">
             {isExporting ? (
-              <span className="inline-flex items-center gap-1"><span className="inline-block size-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> Export</span>
+              <span className="inline-flex items-center gap-1">
+                <span className="inline-block size-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> 
+                {exportProgress || 'Export'}
+              </span>
             ) : (
               <><Download className="size-4 mr-1" /> Download</>
             )}
           </Button>
           <label className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
             <input type="checkbox" checked={exportAllPages} onChange={(e) => setExportAllPages(e.target.checked)} disabled={isExporting} />
-            All pages (slower)
+All pages (phrases + manual highlights + notes)
           </label>
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
@@ -686,6 +777,7 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
 
     const { clientWidth: W, clientHeight: H } = overlay
     const rectNorm = {
+      page: pageNumber,
       x: p.x / W,
       y: p.y / H,
       w: p.w / W,
