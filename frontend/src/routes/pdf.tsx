@@ -400,6 +400,23 @@ function PdfRoute() {
     return out
   }
 
+  function bytesLookLikePdf(ab: ArrayBuffer): boolean {
+    try {
+      const u8 = new Uint8Array(ab)
+      const maxScan = Math.min(u8.length, 1024)
+      for (let i = 0; i <= maxScan - 5; i++) {
+        if (
+          u8[i] === 0x25 && // %
+          u8[i + 1] === 0x50 && // P
+          u8[i + 2] === 0x44 && // D
+          u8[i + 3] === 0x46 && // F
+          u8[i + 4] === 0x2D // -
+        ) return true
+      }
+      return false
+    } catch { return false }
+  }
+
   async function exportPdfWithHighlights() {
     try {
       setIsExporting(true)
@@ -414,6 +431,11 @@ function PdfRoute() {
         pdfBytes = await res.arrayBuffer()
       }
       if (!pdfBytes) throw new Error('No PDF source to export')
+      const sizeBytes = (pdfBytes as ArrayBuffer).byteLength || 0
+      setExportProgress(`PDF size: ${sizeBytes.toLocaleString()} bytes`)
+      if (!bytesLookLikePdf(pdfBytes)) {
+        throw new Error('Loaded bytes do not look like a PDF (missing %PDF- header). Check the URL/file and authentication.')
+      }
 
       // Group notes by page
       const notesByPage: Record<number, { x: number; y: number; text: string }[]> = {}
@@ -458,13 +480,21 @@ function PdfRoute() {
         worker.onmessage = (ev) => {
           try {
             const msg = ev.data || {}
-            if (msg.progress) {
-              setExportProgress(msg.progress)
-            } else if (msg.ok && msg.data) {
-              settle(resolve, msg.data as ArrayBuffer)
-            } else {
-              settle(reject, new Error(msg.error || 'Export failed'))
+            // Accept only our protocol keys; ignore any unrelated messages (e.g., pdf.js internals like { action: 'ready' })
+            if (msg && typeof msg === 'object') {
+              if ('progress' in msg && typeof msg.progress === 'string') {
+                setExportProgress(msg.progress)
+                return
+              }
+              if ('ok' in msg) {
+                if (msg.ok && msg.data) return settle(resolve, msg.data as ArrayBuffer)
+                const errText = (msg.error && String(msg.error)) || 'Export failed'
+                console.error('Worker reported error:', msg)
+                return settle(reject, new Error(errText))
+              }
             }
+            // Otherwise, ignore unknown messages
+            // console.debug('Ignoring worker message:', msg)
           } catch (msgErr) {
             settle(reject, new Error(`Message handling error: ${msgErr}`))
           }
@@ -477,10 +507,13 @@ function PdfRoute() {
         }
         
         try {
-          // Add pdfBytes to payload and transfer the ArrayBuffer
-          const buf = (pdfBytes as ArrayBuffer).slice()
-          payload.pdfBytes = buf
-          worker.postMessage(payload, [buf])
+          // Add pdfBytes to payload and send a cloned typed array (no transfer list)
+          // This avoids any ArrayBuffer detachment edge-cases across environments
+          const src = new Uint8Array(pdfBytes as ArrayBuffer)
+          const copy = new Uint8Array(src.byteLength)
+          copy.set(src)
+          payload.pdfBytes = copy
+          worker.postMessage(payload)
         } catch (postErr) {
           settle(reject, new Error(`Failed to send message to worker: ${postErr}`))
         }

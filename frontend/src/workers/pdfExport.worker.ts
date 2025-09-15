@@ -20,21 +20,43 @@ self.onmessage = async (ev) => {
       return { r: Math.min(1, r / 255), g: Math.min(1, g / 255), b: Math.min(1, b / 255), a: Math.min(1, Math.max(0, a)) }
     }
 
-    // pages is a map: pageNumber -> { width, height, rects (in px of text layer) }
+    // pages is a map: pageNumber -> { width, height, rects }
+    // The coordinates may be in different systems:
+    // - For single page: text layer pixels (needs scaling)
+    // - For full document: PDF points (already scaled)
     for (const key of Object.keys(pagesSpec || {})) {
       const p = Number(key)
       const spec = pagesSpec[key] || { width: 0, height: 0, rects: [] }
       const page = docPages[(p - 1) | 0]
       if (!page || !spec.width || !spec.height) continue
       const { width: pgW, height: pgH } = page.getSize()
-      // scale from text-layer px to page points
-      const sx = pgW / spec.width
-      const sy = pgH / spec.height
+      
+      // Detect coordinate system: if dimensions are close to PDF points, assume already scaled
+      const isAlreadyPdfPoints = Math.abs(spec.width - pgW) < 50 && Math.abs(spec.height - pgH) < 50
+      
+      let sx, sy
+      if (isAlreadyPdfPoints) {
+        // Coordinates are already in PDF points
+        sx = 1
+        sy = 1
+      } else {
+        // Coordinates are in text-layer pixels, need scaling
+        sx = pgW / spec.width
+        sy = pgH / spec.height
+      }
+      
       for (const r of spec.rects) {
         const x = r.x * sx
         const w = r.w * sx
         const h = r.h * sy
-        const y = pgH - (r.y * sy) - h
+        let y
+        if (isAlreadyPdfPoints) {
+          // PDF coordinates: origin at bottom-left, already correct
+          y = r.y
+        } else {
+          // Text layer coordinates: origin at top-left, flip Y axis
+          y = pgH - (r.y * sy) - h
+        }
         const c = parseRgba(r.color)
         page.drawRectangle({ x, y, width: w, height: h, color: rgb(c.r, c.g, c.b), opacity: c.a, borderColor: rgb(0.7, 0.55, 0), borderWidth: 0.5 })
       }
