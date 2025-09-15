@@ -453,7 +453,7 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
   phrases: string[]
   searchCaseSensitive: boolean
   searchWholeWord: boolean
-  activeMatchIndex: number
+  activeMatchIndex: number // reserved for active ring styling
 }, ref: React.Ref<any>) {
   const pageWrapRef = useRef<HTMLDivElement | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -693,7 +693,7 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
             // Visible highlight with invisible text so canvas glyphs show normally
             return text.replace(re, (m) => `<mark data-pdfmark=\"1\" style=\"background: rgba(255,231,115,0.5); color: transparent; -webkit-text-fill-color: transparent; border-radius: 2px; padding: 0 .04em; margin: 0 -.02em; box-shadow: none;\">${m}</mark>`)
           }}
-          onRenderTextSuccess={() => {
+          onRenderSuccess={() => {
             // no-op
           }}
           onLoadError={(err) => console.error(err?.message || String(err))}

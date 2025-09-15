@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport } from 'ai'
 import {
@@ -7,7 +7,7 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from '@/components/ai-elements/conversation'
-import { Message, MessageAvatar, MessageContent } from '@/components/ai-elements/message'
+import { Message, MessageContent } from '@/components/ai-elements/message'
 import { Response } from '@/components/ai-elements/response'
 import { Actions, Action } from '@/components/ai-elements/actions'
 import { Loader } from '@/components/ai-elements/loader'
@@ -30,7 +30,7 @@ import {
 } from '@/components/ai-elements/prompt-input'
 import { Button } from '@/components/ui/button'
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select'
-import { Mic, Plus } from 'lucide-react'
+import { Mic } from 'lucide-react'
 
 export const Route = createFileRoute('/')({
   component: ChatPage,
@@ -41,7 +41,7 @@ export const Route = createFileRoute('/')({
 
 const BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL ?? 'http://localhost:3000'
 
-import type { FileUIPart } from 'ai'
+//
 
 // Helper component for case selection
 function CaseSelector({ caseId, setCaseId }: { caseId: string | undefined; setCaseId: (id: string | undefined) => void }) {
@@ -145,7 +145,7 @@ function ChatPage() {
   const [caseId, setCaseId] = useState<string | undefined>(undefined)
   const [sessionId, setSessionId] = useState<string>('')
   const [reaction, setReaction] = useState<'like' | 'dislike' | null>(null)
-  const [hoveredAssistantIndex, setHoveredAssistantIndex] = useState<number | null>(null)
+  const [hoveredAssistantIndex, setHoveredAssistantIndex] = useState<number | null>(null) // reserved for hover effects
   const [copied, setCopied] = useState(false)
   const [prompt, setPrompt] = useState('')
   

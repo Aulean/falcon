@@ -134,7 +134,7 @@ function NewCasePage() {
       if (newId) {
         navigate({ to: '/cases/$caseId', params: { caseId: String(newId) } })
       } else {
-        navigate({ to: '/cases' })
+        navigate({ to: '/' })
       }
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err))
@@ -151,7 +151,7 @@ function NewCasePage() {
           <h1 className="text-2xl font-semibold tracking-tight">New Case</h1>
           <p className="text-sm text-muted-foreground">Create a case tailored for Maltese practice.</p>
         </div>
-        <Link to="/cases" preload={false}>
+        <Link to="/" preload={false}>
           <Button variant="outline">Back to Cases</Button>
         </Link>
       </div>
@@ -266,7 +266,7 @@ function NewCasePage() {
         )}
 
         <div className="flex items-center justify-end gap-2">
-          <Link to="/cases" preload={false}>
+          <Link to="/" preload={false}>
             <Button type="button" variant="outline">Cancel</Button>
           </Link>
           <Button type="submit" className="bg-teal-700 text-white hover:bg-teal-600" disabled={submitting}>

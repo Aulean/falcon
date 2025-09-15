@@ -363,7 +363,7 @@ function WorkspacesPage() {
   )
 }
 
-function EmptyCasesState({ onCreate }: { onCreate: () => void }) {
+function EmptyCasesState({ onCreate }: { onCreate: () => void }) { /* onCreate reserved for future use */
   return (
     <div className="flex flex-1 items-center justify-center py-16">
       <div className="mx-auto max-w-xl text-center">

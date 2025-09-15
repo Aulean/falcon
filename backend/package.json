@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "bunx drizzle-kit generate",
     "db:migrate": "bunx drizzle-kit migrate",
-    "build": "bun build ./src/server.ts --outdir dist --target bun"
+    "build": "bun build ./index.ts --outdir dist --target bun"
   },
   "devDependencies": {
     "@types/bun": "latest",
