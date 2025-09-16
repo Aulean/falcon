@@ -6,7 +6,7 @@ self.onmessage = async (ev) => {
     const { pdfBytes, pages: pagesSpec, notesByPage } = ev.data || {}
     if (!pdfBytes) throw new Error('No PDF bytes provided')
 
-    const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib')
+    const { PDFDocument, rgb, StandardFonts, PDFName, PDFString, PDFBool } = await import('pdf-lib')
     const pdfDoc = await PDFDocument.load(pdfBytes)
 
     const docPages = pdfDoc.getPages()
@@ -62,55 +62,119 @@ self.onmessage = async (ev) => {
       }
     }
 
-    // Add marginal notes (standard printable approximation)
-    // Strategy: draw a small sticky rectangle in the right margin with wrapped note text.
-    const defaultFont = await pdfDoc.embedFont(StandardFonts.TimesRoman).catch(() => null)
-    const fontSize = 9
-    const stickyWidth = 160
-    const stickyPad = 6
-    const stickyBg = rgb(1, 1, 0.8) // light yellow
+    // Add non-blocking underline markup annotation near anchor
+    const addUnderlineAnnotation = (page: any, x: number, y: number, text: string) => {
+      const width = 40
+      const height = 2
+      const rect = pdfDoc.context.obj([x, y, x + width, y + height])
+      const quad = pdfDoc.context.obj([
+        x, y + height,
+        x + width, y + height,
+        x + width, y,
+        x, y,
+      ])
+      const annot = pdfDoc.context.obj({
+        Type: PDFName.of('Annot'),
+        Subtype: PDFName.of('Underline'),
+        Rect: rect,
+        QuadPoints: quad,
+        Contents: PDFString.of(text),
+        C: pdfDoc.context.obj([1, 1, 0]) // yellow underline
+      })
+      const annotRef = pdfDoc.context.register(annot)
+      const annots: any = page.node.get(PDFName.of('Annots'))
+      if (annots) annots.push(annotRef)
+      else page.node.set(PDFName.of('Annots'), pdfDoc.context.obj([annotRef]))
+    }
 
     for (const key of Object.keys(notesByPage || {})) {
       const p = Number(key)
       const page = docPages[(p - 1) | 0]
       if (!page) continue
-      const { width, height } = page.getSize()
+      const { width: pgW, height: pgH } = page.getSize()
       const notes = notesByPage[key] || []
-      // Stack notes down from the top-right margin, avoiding content area
-      let cursorY = height - 40
-      const marginRight = 24
+
+      const spec = (pagesSpec || {})[key]
+      const isAlreadyPdfPoints = spec && Math.abs(spec.width - pgW) < 50 && Math.abs(spec.height - pgH) < 50
+      const sx = spec ? (isAlreadyPdfPoints ? 1 : pgW / spec.width) : 1
+      const sy = spec ? (isAlreadyPdfPoints ? 1 : pgH / spec.height) : 1
+
+      const rects = (spec && spec.rects) ? spec.rects : []
+
+      const rectToPdfQuad = (r: any) => {
+        const x = r.x * sx
+        const w = r.w * sx
+        const h = r.h * sy
+        const y = isAlreadyPdfPoints ? r.y : pgH - (r.y * sy) - h
+        return { x, y, w, h, quad: [x, y + h, x + w, y + h, x + w, y, x, y] as number[] }
+      }
+
+      const addHighlightAnnotation = (page: any, quads: number[][], text: string) => {
+        if (!quads.length) return
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+        for (const q of quads) {
+          minX = Math.min(minX, q[0], q[6])
+          minY = Math.min(minY, q[5], q[7])
+          maxX = Math.max(maxX, q[2], q[4])
+          maxY = Math.max(maxY, q[1], q[3])
+        }
+        const rect = pdfDoc.context.obj([minX, minY, maxX, maxY])
+        const flat = ([] as number[]).concat(...quads)
+        const annot = pdfDoc.context.obj({
+          Type: PDFName.of('Annot'),
+          Subtype: PDFName.of('Highlight'),
+          Rect: rect,
+          QuadPoints: pdfDoc.context.obj(flat),
+          Contents: PDFString.of(text),
+          C: pdfDoc.context.obj([1, 1, 0])
+        })
+        const ref = pdfDoc.context.register(annot)
+        const annots: any = page.node.get(PDFName.of('Annots'))
+        if (annots) annots.push(ref)
+        else page.node.set(PDFName.of('Annots'), pdfDoc.context.obj([ref]))
+      }
+
       for (const n of notes) {
         const text = String(n.text || '').trim()
         if (!text) continue
-        const x = width - marginRight - stickyWidth
-        let y = cursorY
-        const maxLineWidth = stickyWidth - stickyPad * 2
-        // naive wrap: split by spaces
-        const words = text.split(/\s+/)
-        const lines = []
-        let line = ''
-        const measure = (s) => (defaultFont ? defaultFont.widthOfTextAtSize(s, fontSize) : s.length * (fontSize * 0.55))
-        for (const w of words) {
-          const test = line ? line + ' ' + w : w
-          if (measure(test) <= maxLineWidth) line = test
-          else { lines.push(line); line = w }
+        // Anchor in spec coordinates (top-left origin) if spec available
+        const axSpec = spec ? (n.x * spec.width) : (n.x * pgW)
+        const aySpec = spec ? (n.y * spec.height) : ((1 - n.y) * pgH) // if no spec, fallback to pdf coords later
+
+        let candidateRects: any[] = []
+        if (spec) {
+          candidateRects = rects.filter((r: any) => axSpec >= r.x && axSpec <= r.x + r.w && aySpec >= r.y && aySpec <= r.y + r.h)
+          if (candidateRects.length === 0) {
+            // fallback: nearby rects within 24px
+            candidateRects = rects.filter((r: any) => Math.abs((r.x + r.w / 2) - axSpec) < 24 && Math.abs((r.y + r.h / 2) - aySpec) < 24).slice(0, 3)
+          }
         }
-        if (line) lines.push(line)
-        const boxHeight = stickyPad * 2 + lines.length * (fontSize + 2)
-        y = Math.max(24, y - boxHeight)
-        // sticky background
-        page.drawRectangle({ x, y, width: stickyWidth, height: boxHeight, color: stickyBg, borderColor: rgb(0.85, 0.75, 0.2), borderWidth: 0.6, opacity: 1 })
-        // text
-        let ty = y + boxHeight - stickyPad - fontSize
-        for (const ln of lines) {
-          page.drawText(ln, { x: x + stickyPad, y: ty, size: fontSize, color: rgb(0, 0, 0), font: defaultFont || undefined })
-          ty -= fontSize + 2
+
+        const quads: number[][] = []
+        for (const r of candidateRects) {
+          quads.push(rectToPdfQuad(r).quad)
         }
-        // connector line from anchor to sticky
-        const anchorX = n.x * width
-        const anchorY = (1 - n.y) * height
-        page.drawLine({ start: { x: x + stickyWidth, y: y + boxHeight - 8 }, end: { x: anchorX, y: anchorY }, color: rgb(0.4, 0.4, 0.4), thickness: 0.6 })
-        cursorY = y - 12
+
+        if (quads.length === 0) {
+          // last resort: create a reasonable box around anchor
+          const wSpec = spec ? spec.width : pgW
+          const hSpec = spec ? spec.height : pgH
+          const widthGuess = Math.min(120, (wSpec * 0.25))
+          const heightGuess = Math.min(18, (hSpec * 0.03))
+          const rx = Math.max(0, Math.min((spec ? axSpec : n.x * wSpec) - widthGuess / 2, wSpec - widthGuess))
+          const ryTop = spec ? Math.max(0, Math.min(aySpec - heightGuess / 2, hSpec - heightGuess)) : null
+          const ry = spec ? ryTop! : (pgH - ((1 - n.y) * pgH) - heightGuess / 2) // unused when spec set
+          const rTemp = spec ? { x: rx, y: ryTop!, w: widthGuess, h: heightGuess } : null
+          if (spec && rTemp) quads.push(rectToPdfQuad(rTemp).quad)
+          else {
+            // directly in pdf coords
+            const x = Math.max(8, Math.min(pgW - 8 - widthGuess, n.x * pgW - widthGuess / 2))
+            const y = Math.max(8, Math.min(pgH - 8 - heightGuess, (1 - n.y) * pgH - heightGuess / 2))
+            quads.push([x, y + heightGuess, x + widthGuess, y + heightGuess, x + widthGuess, y, x, y])
+          }
+        }
+
+        addHighlightAnnotation(page, quads, text)
       }
     }
 

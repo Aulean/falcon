@@ -6,7 +6,7 @@
 // IMPORTANT: This worker avoids using a nested pdf.js core worker by passing disableWorker: true
 // so it won't conflict with React-PDF's own worker in the main thread.
 
-import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
+import { PDFDocument, rgb, StandardFonts, PDFName, PDFString, PDFBool } from 'pdf-lib'
 import { getDocument, GlobalWorkerOptions, version as pdfjsVersion } from 'pdfjs-dist/build/pdf'
 // Vite: resolve the core worker file URL at build-time so pdf.js won't need a CDN
 // This keeps everything local and avoids dynamic import issues in workers
@@ -296,48 +296,89 @@ self.onmessage = async (ev) => {
       page.drawRectangle({ x, y, width: w, height: hh, color: rgb(c.r, c.g, c.b), opacity: c.a, borderColor: rgb(0.7, 0.55, 0), borderWidth: 0.5 })
     }
 
-    // Marginal notes
-    const defaultFont = await pdfDoc.embedFont(StandardFonts.TimesRoman).catch(() => null)
-    const fontSize = 9
-    const stickyWidth = 160
-    const stickyPad = 6
-    const stickyBg = rgb(1, 1, 0.8)
+    // Add non-blocking underline markup annotation near anchor
+    const addUnderlineAnnotation = (page: any, x: number, y: number, text: string) => {
+      const width = 40
+      const height = 2
+      const rect = pdfDoc.context.obj([x, y, x + width, y + height])
+      const quad = pdfDoc.context.obj([
+        x, y + height,
+        x + width, y + height,
+        x + width, y,
+        x, y,
+      ])
+      const annot = pdfDoc.context.obj({
+        Type: PDFName.of('Annot'),
+        Subtype: PDFName.of('Underline'),
+        Rect: rect,
+        QuadPoints: quad,
+        Contents: PDFString.of(text),
+        C: pdfDoc.context.obj([1, 1, 0])
+      })
+      const annotRef = pdfDoc.context.register(annot)
+      const annots: any = page.node.get(PDFName.of('Annots'))
+      if (annots) annots.push(annotRef)
+      else page.node.set(PDFName.of('Annots'), pdfDoc.context.obj([annotRef]))
+    }
 
     for (const [pageKey, notes] of Object.entries(data.notesByPage || {})) {
       const p = Number(pageKey)
       const page = libPages[p - 1]
       if (!page || !notes || notes.length === 0) continue
-      const { width, height } = page.getSize()
-      let cursorY = height - 40
-      const marginRight = 24
+      const { width: pgW, height: pgH } = page.getSize()
+      
+      const addHighlightAnnotation = (quads: number[][], text: string) => {
+        if (!quads.length) return
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+        for (const q of quads) {
+          minX = Math.min(minX, q[0], q[6])
+          minY = Math.min(minY, q[5], q[7])
+          maxX = Math.max(maxX, q[2], q[4])
+          maxY = Math.max(maxY, q[1], q[3])
+        }
+        const rect = pdfDoc.context.obj([minX, minY, maxX, maxY])
+        const flat = ([] as number[]).concat(...quads)
+        const annot = pdfDoc.context.obj({
+          Type: PDFName.of('Annot'),
+          Subtype: PDFName.of('Highlight'),
+          Rect: rect,
+          QuadPoints: pdfDoc.context.obj(flat),
+          Contents: PDFString.of(text),
+          C: pdfDoc.context.obj([1, 1, 0])
+        })
+        const ref = pdfDoc.context.register(annot)
+        const annots: any = page.node.get(PDFName.of('Annots'))
+        if (annots) annots.push(ref)
+        else page.node.set(PDFName.of('Annots'), pdfDoc.context.obj([ref]))
+      }
+
       for (const n of notes) {
         const text = String(n.text || '').trim()
         if (!text) continue
-        const x = width - marginRight - stickyWidth
-        let y = cursorY
-        const maxLineWidth = stickyWidth - stickyPad * 2
-        const measure = (s: string) => defaultFont ? defaultFont.widthOfTextAtSize(s, fontSize) : s.length * (fontSize * 0.55)
-        const words = text.split(/\s+/)
-        const lines: string[] = []
-        let line = ''
-        for (const w of words) {
-          const t = line ? line + ' ' + w : w
-          if (measure(t) <= maxLineWidth) line = t
-          else { if (line) lines.push(line); line = w }
+        // Try to find manual highlight rects near this anchor (from data.manualHighlights)
+        const ax = n.x * pgW
+        const ay = (1 - n.y) * pgH
+        const related = (data.manualHighlights || []).filter((h: any) => h.page === p && typeof h.label === 'string' && h.label.startsWith('note:'))
+        let quads: number[][] = []
+        for (const h of related) {
+          const x = h.x * pgW
+          const w = h.w * pgW
+          const hh = h.h * pgH
+          const y = pgH - (h.y * pgH) - hh
+          // include if anchor is within or very close
+          if ((ax >= x - 6 && ax <= x + w + 6) && (ay >= y - 6 && ay <= y + hh + 6)) {
+            quads.push([x, y + hh, x + w, y + hh, x + w, y, x, y])
+          }
         }
-        if (line) lines.push(line)
-        const boxHeight = stickyPad * 2 + lines.length * (fontSize + 2)
-        y = Math.max(24, y - boxHeight)
-        page.drawRectangle({ x, y, width: stickyWidth, height: boxHeight, color: stickyBg, borderColor: rgb(0.85, 0.75, 0.2), borderWidth: 0.6, opacity: 1 })
-        let ty = y + boxHeight - stickyPad - fontSize
-        for (const ln of lines) {
-          page.drawText(ln, { x: x + stickyPad, y: ty, size: fontSize, color: rgb(0, 0, 0), font: defaultFont || undefined })
-          ty -= fontSize + 2
+        if (!quads.length) {
+          // fallback small box around anchor
+          const wGuess = Math.min(120, pgW * 0.25)
+          const hGuess = Math.min(18, pgH * 0.03)
+          const x = Math.max(8, Math.min(pgW - 8 - wGuess, ax - wGuess / 2))
+          const y = Math.max(8, Math.min(pgH - 8 - hGuess, ay - hGuess / 2))
+          quads = [[x, y + hGuess, x + wGuess, y + hGuess, x + wGuess, y, x, y]]
         }
-        const anchorX = n.x * width
-        const anchorY = (1 - n.y) * height
-        page.drawLine({ start: { x: x + stickyWidth, y: y + boxHeight - 8 }, end: { x: anchorX, y: anchorY }, color: rgb(0.4, 0.4, 0.4), thickness: 0.6 })
-        cursorY = y - 12
+        addHighlightAnnotation(quads, text)
       }
     }
 
