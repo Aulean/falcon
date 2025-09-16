@@ -359,6 +359,15 @@ function PdfRoute() {
   async function gatherRectsForExport(fullDocument = true): Promise<Record<number, { width: number; height: number; rects: { x: number; y: number; w: number; h: number; color?: string }[] }>> {
     const out: Record<number, { width: number; height: number; rects: { x: number; y: number; w: number; h: number; color?: string }[] }> = {}
     
+    // Ensure exported colors match on-screen highlights
+    const colorFor = (h: RectNorm) => {
+      if (h && typeof h.color === 'string' && h.color) return h.color
+      const isNoteRef = typeof h.label === 'string' && h.label.startsWith('note:')
+      if (isNoteRef) return 'rgba(255,231,115,0.4)' // yellow for note refs
+      if (h?.source === 'auto') return 'rgba(13,148,136,0.3)' // teal for AI/auto
+      return 'rgba(59,130,246,0.3)' // blue for manual
+    }
+    
     if (fullDocument) {
       // For full document export, we'll primarily rely on manual highlights
       // and avoid the fragile DOM-based phrase highlight extraction that causes race conditions
@@ -386,7 +395,7 @@ function PdfRoute() {
           y: pdfY,
           w: pdfW,
           h: pdfH,
-          color: h.color
+          color: colorFor(h)
         })
       }
       
@@ -440,7 +449,7 @@ function PdfRoute() {
           y: h.y * height, 
           w: h.w * width, 
           h: h.h * height, 
-          color: h.color 
+          color: colorFor(h) 
         })
       }
     }

@@ -385,6 +385,12 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
     
     const out: Record<number, { width: number; height: number; rects: { x: number; y: number; w: number; h: number; color?: string }[] }> = {}
     
+    // Match on-screen highlight colors when color is not explicitly set
+    const colorFor = (h: RectNorm) => {
+      if (h && typeof h.color === 'string' && h.color) return h.color
+      return 'rgba(59, 130, 246, 0.25)'
+    }
+    
     if (fullDocument) {
       const defaultPageDimensions = { width: 595, height: 842 }
       
@@ -403,7 +409,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           y: pdfY,
           w: pdfW,
           h: pdfH,
-          color: h.color
+          color: colorFor(h)
         })
       }
       
@@ -448,7 +454,7 @@ const PDFViewer: React.FC<PDFViewerProps> = ({
           y: h.y * height, 
           w: h.w * width, 
           h: h.h * height, 
-          color: h.color 
+          color: colorFor(h) 
         })
       }
     }

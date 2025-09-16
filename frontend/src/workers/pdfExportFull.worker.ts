@@ -20,6 +20,7 @@ interface ExportMessage {
     caseSensitive?: boolean
     wholeWord?: boolean
   }
+  isAiSearch?: boolean
   manualHighlights: Array<{
     page: number
     x: number
@@ -27,6 +28,8 @@ interface ExportMessage {
     w: number
     h: number
     color?: string
+    source?: 'manual' | 'auto'
+    label?: string
   }>
   notesByPage: Record<number, Array<{
     x: number
@@ -137,6 +140,14 @@ self.onmessage = async (ev) => {
         b: Math.min(1, Math.max(0, b / 255)),
         a: Math.min(1, Math.max(0, a)),
       }
+    }
+
+    const pickHighlightColor = (h: any): string => {
+      if (h && typeof h.color === 'string' && h.color) return h.color
+      const label = typeof h?.label === 'string' ? h.label : ''
+      if (label.startsWith('note:')) return 'rgba(255,231,115,0.4)'
+      if (h?.source === 'auto') return 'rgba(13,148,136,0.3)'
+      return 'rgba(59,130,246,0.3)'
     }
 
     type Match = { page: number; x: number; y: number; width: number; height: number; color?: string }
@@ -267,7 +278,8 @@ self.onmessage = async (ev) => {
       const x = m.x * sx
       const y = pgH - (m.y * sy) - h
 
-      const c = parseRgba('rgba(255,231,115,0.42)')
+      const phraseColor = data.isAiSearch ? 'rgba(13,148,136,0.4)' : 'rgba(255,231,115,0.4)'
+      const c = parseRgba(phraseColor)
       page.drawRectangle({ x, y, width: w, height: h, color: rgb(c.r, c.g, c.b), opacity: c.a, borderColor: rgb(0.7, 0.55, 0), borderWidth: 0.5 })
     }
 
@@ -280,7 +292,7 @@ self.onmessage = async (ev) => {
       const w = h.w * pgW
       const hh = h.h * pgH
       const y = pgH - (h.y * pgH) - hh
-      const c = parseRgba(h.color)
+      const c = parseRgba(pickHighlightColor(h as any))
       page.drawRectangle({ x, y, width: w, height: hh, color: rgb(c.r, c.g, c.b), opacity: c.a, borderColor: rgb(0.7, 0.55, 0), borderWidth: 0.5 })
     }
 
