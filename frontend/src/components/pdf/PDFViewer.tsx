@@ -12,6 +12,10 @@ pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.vers
 import 'react-pdf/dist/Page/TextLayer.css'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 
+// Prevent re-rendering of react-pdf Page when selection/tooltips update
+// Keeps native text selection from disappearing
+const MemoPage = React.memo(Page as unknown as React.FC<any>) as unknown as typeof Page
+
 // Types
 export interface RectNorm {
   id: string
@@ -824,6 +828,64 @@ const PDFPageWithHighlights = forwardRef(function PDFPageWithHighlights({
   const baseWidth = Math.max(480, Math.min(1400, Math.round(containerWidth)))
   const renderWidth = Math.round(baseWidth * zoom)
 
+  // Stable DPR so <Page> doesn’t re-render on unrelated state updates
+  const devicePixelRatioStable = useMemo(() => (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1), [])
+
+  // Stable custom text renderer so Page identity stays the same when tooltips/notes change
+  const customTextRenderer = useCallback(({ str }: { str: string }) => {
+    const text = String(str)
+    if (!phrases || phrases.length === 0) return text
+
+    const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const parts = phrases.map((p) => (searchWholeWord ? `\\b${escape(p)}\\b` : escape(p)))
+    if (parts.length === 0) return text
+
+    const flags = searchCaseSensitive ? 'g' : 'gi'
+    const re = new RegExp(`(${parts.join('|')})`, flags)
+
+    // Find all matches and their positions
+    const matches: { start: number; end: number; text: string }[] = []
+    let match: RegExpExecArray | null
+    re.lastIndex = 0
+    while ((match = re.exec(text))) {
+      matches.push({ start: match.index, end: match.index + match[0].length, text: match[0] })
+    }
+
+    // Sort matches by position
+    matches.sort((a, b) => a.start - b.start)
+
+    // Merge overlapping matches to avoid stacked highlights
+    const mergedMatches: { start: number; end: number; text: string }[] = []
+    for (const m of matches) {
+      const last = mergedMatches[mergedMatches.length - 1]
+      if (last && m.start <= last.end) {
+        // Overlapping or adjacent - merge them
+        last.end = Math.max(last.end, m.end)
+        last.text = text.slice(last.start, last.end)
+      } else {
+        mergedMatches.push({ ...m })
+      }
+    }
+
+    // Build result with non-overlapping highlights
+    let result = ''
+    let lastIndex = 0
+    for (const m of mergedMatches) {
+      // Add text before the match
+      result += text.slice(lastIndex, m.start)
+      // Add highlighted text with improved styling
+      result += `<mark data-pdfmark=\"1\" style=\"background: linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(34, 197, 94, 0.3) 100%); color: rgba(0, 0, 0, 0.9); -webkit-text-fill-color: rgba(0, 0, 0, 0.9); border-radius: 3px; padding: 1px 2px; margin: 0; box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2); font-weight: 500;\">${m.text}</mark>`
+      lastIndex = m.end
+    }
+    // Add remaining text
+    result += text.slice(lastIndex)
+
+    return result
+  }, [phrases, searchCaseSensitive, searchWholeWord])
+
+  const onRenderSuccess = useCallback(() => {}, [])
+  const onLoadError = useCallback((err: any) => console.error(err?.message || String(err)), [])
+
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false)
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
@@ -1082,65 +1144,16 @@ const PDFPageWithHighlights = forwardRef(function PDFPageWithHighlights({
   return (
     <div className="flex justify-center">
       <div ref={pageWrapRef} className="relative" style={{ width: renderWidth }}>
-        <Page
+        <MemoPage
           pageNumber={pageNumber}
           width={baseWidth}
           scale={zoom}
-          devicePixelRatio={typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1}
+          devicePixelRatio={devicePixelRatioStable}
           renderAnnotationLayer
           renderTextLayer
-          customTextRenderer={({ str }) => {
-            const text = String(str)
-            if (!phrases || phrases.length === 0) return text
-            
-            const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            const parts = phrases.map((p) => (searchWholeWord ? `\\b${escape(p)}\\b` : escape(p)))
-            if (parts.length === 0) return text
-            
-            const flags = searchCaseSensitive ? 'g' : 'gi'
-            const re = new RegExp(`(${parts.join('|')})`, flags)
-            
-            // Find all matches and their positions
-            const matches: { start: number; end: number; text: string }[] = []
-            let match: RegExpExecArray | null
-            re.lastIndex = 0
-            while ((match = re.exec(text))) {
-              matches.push({ start: match.index, end: match.index + match[0].length, text: match[0] })
-            }
-            
-            // Sort matches by position
-            matches.sort((a, b) => a.start - b.start)
-            
-            // Merge overlapping matches to avoid stacked highlights
-            const mergedMatches: { start: number; end: number; text: string }[] = []
-            for (const match of matches) {
-              const last = mergedMatches[mergedMatches.length - 1]
-              if (last && match.start <= last.end) {
-                // Overlapping or adjacent - merge them
-                last.end = Math.max(last.end, match.end)
-                last.text = text.slice(last.start, last.end)
-              } else {
-                mergedMatches.push({ ...match })
-              }
-            }
-            
-            // Build result with non-overlapping highlights
-            let result = ''
-            let lastIndex = 0
-            for (const match of mergedMatches) {
-              // Add text before the match
-              result += text.slice(lastIndex, match.start)
-              // Add highlighted text with improved styling
-              result += `<mark data-pdfmark="1" style="background: linear-gradient(135deg, rgba(34, 197, 94, 0.2) 0%, rgba(34, 197, 94, 0.3) 100%); color: rgba(0, 0, 0, 0.9); -webkit-text-fill-color: rgba(0, 0, 0, 0.9); border-radius: 3px; padding: 1px 2px; margin: 0; box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.2); font-weight: 500;">${match.text}</mark>`
-              lastIndex = match.end
-            }
-            // Add remaining text
-            result += text.slice(lastIndex)
-            
-            return result
-          }}
-          onRenderSuccess={() => {}}
-          onLoadError={(err) => console.error(err?.message || String(err))}
+          customTextRenderer={customTextRenderer}
+          onRenderSuccess={onRenderSuccess}
+          onLoadError={onLoadError}
         />
 
         <div

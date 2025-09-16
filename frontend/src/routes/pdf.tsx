@@ -19,6 +19,10 @@ const BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL ?? 'http://localh
 import 'react-pdf/dist/Page/TextLayer.css'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 
+// Keep react-pdf Page from re-rendering when only selection UI changes
+// This preserves the browser's native text selection highlight.
+const MemoPage = React.memo(Page as unknown as React.FC<any>) as unknown as typeof Page
+
 export const Route = createFileRoute('/pdf')({
   component: PdfRoute,
 })
@@ -927,6 +931,40 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
   const baseWidth = Math.max(480, Math.min(1400, Math.round(containerWidth)))
   const renderWidth = Math.round(baseWidth * zoom)
 
+  // Stable DPR so it doesn't cause unnecessary <Page> re-renders
+  const devicePixelRatioStable = React.useMemo(() => (typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1), [])
+
+  // Stable text renderer: do not change identity when selection UI updates
+  const customTextRenderer = React.useCallback((props: { str: string; itemIndex: number }) => {
+    const { str, itemIndex } = props
+    if (!searchPhrase || searchPhrase.length < 2) return str
+
+    const escapedPhrase = searchPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const regex = new RegExp(`(${escapedPhrase})`, searchCaseSensitive ? 'g' : 'gi')
+    const parts = String(str).split(regex)
+
+    return parts
+      .map((part, idx) => {
+        if (regex.test(part)) {
+          const markIndex = `${pageNumber}_${itemIndex}_${idx}`
+          const isActive = activeMatchIndex === itemIndex
+          const bgColor = isActive
+            ? 'rgba(34, 197, 94, 0.5)'
+            : isAiSearchActive
+              ? 'rgba(13, 148, 136, 0.4)'
+              : 'rgba(255, 231, 115, 0.4)'
+          return `<mark data-pdfmark=\"1\" data-index=\"${markIndex}\" style=\"background-color: ${bgColor}; color: inherit; border-radius: 2px;\">${part}</mark>`
+        }
+        return part
+      })
+      .join('')
+  }, [searchPhrase, searchCaseSensitive, isAiSearchActive, pageNumber, activeMatchIndex])
+
+  const onRenderSuccess = React.useCallback(() => {}, [])
+  const onLoadError = React.useCallback((err: any) => {
+    console.error(err?.message || String(err))
+  }, [])
+
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false)
   const startRef = useRef<{ x: number; y: number } | null>(null)
@@ -1354,45 +1392,16 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
     <>
       <div className="flex justify-center">
         <div ref={pageWrapRef} className="relative" style={{ width: renderWidth }} onMouseUp={onPageMouseUp}>
-        <Page
+        <MemoPage
           pageNumber={pageNumber}
           width={baseWidth}
           scale={zoom}
-          devicePixelRatio={typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1}
+          devicePixelRatio={devicePixelRatioStable}
           renderAnnotationLayer
           renderTextLayer
-          customTextRenderer={(props) => {
-            const { str, itemIndex } = props
-            if (!searchPhrase || searchPhrase.length < 2) return str
-            
-            // Escape the search phrase for regex
-            const escapedPhrase = searchPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            const regex = new RegExp(`(${escapedPhrase})`, searchCaseSensitive ? 'g' : 'gi')
-            const parts = str.split(regex)
-            
-            return parts
-              .map((part, idx) => {
-                if (regex.test(part)) {
-                  const markIndex = `${pageNumber}_${itemIndex}_${idx}`
-                  const isActive = activeMatchIndex === itemIndex
-                  // Apply visible highlight via mark element - teal for AI, yellow for manual
-                  const bgColor = isActive 
-                    ? 'rgba(34, 197, 94, 0.5)' // green for active
-                    : isAiSearchActive 
-                      ? 'rgba(13, 148, 136, 0.4)' // teal for AI results
-                      : 'rgba(255, 231, 115, 0.4)' // yellow for manual search
-                  return `<mark data-pdfmark="1" data-index="${markIndex}" style="background-color: ${bgColor}; color: inherit; border-radius: 2px;">${part}</mark>`
-                }
-                return part
-              })
-              .join('')
-          }}
-          onRenderSuccess={() => {
-            // Page rendered successfully
-          }}
-          onLoadError={(err) => {
-            console.error(err?.message || String(err))
-          }}
+          customTextRenderer={customTextRenderer}
+          onRenderSuccess={onRenderSuccess}
+          onLoadError={onLoadError}
         />
 
         {/* Selection toolbar - positioned relative to page, not in overlay */}
