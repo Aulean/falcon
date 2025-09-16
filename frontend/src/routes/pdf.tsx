@@ -4,7 +4,8 @@ import { Document, Page, pdfjs } from 'react-pdf'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
-import { Trash2, MousePointer2, Hand, Upload, Link as LinkIcon, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Search, Download } from 'lucide-react'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Trash2, MousePointer2, Hand, Upload, Link as LinkIcon, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Maximize2, Search, Download, X, BookOpen } from 'lucide-react'
 
 // react-pdf / pdfjs worker setup
 // Use CDN worker that matches the API version to avoid mismatches across nested deps
@@ -61,6 +62,11 @@ function PdfRoute() {
   // Measured width of the viewer area (outside of react-pdf to avoid feedback loops)
   const viewerRef = useRef<HTMLDivElement | null>(null)
   const [viewerWidth, setViewerWidth] = useState<number>(800)
+
+  // Notes drawer state (self-contained in viewer)
+  const [notesOpen, setNotesOpen] = useState<boolean>(true)
+  const [hoverNoteId, setHoverNoteId] = useState<string | null>(null)
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   useEffect(() => {
     const el = viewerRef.current
     if (!el) return
@@ -146,14 +152,25 @@ function PdfRoute() {
 
   const addHighlight = useCallback((rect: Omit<RectNorm, 'id'>) => {
     const id = 'r_' + Math.random().toString(36).slice(2, 10)
-    setHighlights((prev) => [...prev, { id, source: 'manual', ...rect }])
+    console.log('addHighlight called with:', rect)
+    setHighlights((prev) => {
+      const newHighlights = [...prev, { id, source: 'manual', ...rect }]
+      console.log('New highlights array:', newHighlights)
+      return newHighlights
+    })
   }, [])
 
   const removeHighlight = useCallback((id: string) => {
     setHighlights((prev) => prev.filter((r) => r.id !== id))
   }, [])
 
-  const clearHighlights = () => setHighlights((_) => _.filter((r) => r.page !== pageNumber))
+  const clearHighlights = () => {
+    setHighlights((_) => _.filter((r) => r.page !== pageNumber))
+    setSearchPhrase('') // Clear search highlights too
+    setIsAiSearchActive(false) // Reset AI search state
+    setMatchCount(0)
+    setMatchIndex(-1)
+  }
   const addNote = useCallback((n: NoteAnn) => setNotes((prev) => [...prev, n]), [])
   const updateNote = useCallback((id: string, text: string) => setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, text } : n))), [])
   const removeNote = useCallback((id: string) => setNotes((prev) => prev.filter((n) => n.id !== id)), [])
@@ -171,6 +188,10 @@ function PdfRoute() {
   const [isExporting, setIsExporting] = useState<boolean>(false)
   const [exportProgress, setExportProgress] = useState<string>('')
   const [exportAllPages, setExportAllPages] = useState(false)
+  
+  // Active search phrase for text layer marking
+  const [searchPhrase, setSearchPhrase] = useState<string>('')
+  const [isAiSearchActive, setIsAiSearchActive] = useState(false)
 
   // Imperative handle to talk to the page
   const pageHandleRef = useRef<any>(null)
@@ -182,7 +203,7 @@ function PdfRoute() {
   const [matchCount, setMatchCount] = useState<number>(0)
   const [matchIndex, setMatchIndex] = useState<number>(-1)
 
-  // Recount matches whenever the page or phrases change
+  // Recount matches whenever the page or search changes
   useEffect(() => {
     let canceled = false
     ;(async () => {
@@ -194,7 +215,7 @@ function PdfRoute() {
       if (c) pageHandleRef.current?.setActiveMatch?.(0)
     })()
     return () => { canceled = true }
-  }, [pageNumber, activePhrases, caseSensitive, wholeWord])
+  }, [pageNumber, searchPhrase, caseSensitive, wholeWord])
 
   const goToMatch = (delta: number) => {
     if (!matchCount) return
@@ -214,27 +235,40 @@ function PdfRoute() {
     return false
   }
   async function findAcrossPages(phrases: string[], opts: { caseSensitive?: boolean; wholeWord?: boolean } = {}) {
-    // Set phrases for marking
-    setActivePhrases(phrases)
+    // Set search phrase for text layer marking
+    setSearchPhrase(phrases.join('|'))
+    setIsAiSearchActive(true) // AI search
+    setCaseSensitive(opts.caseSensitive ?? false)
+    setWholeWord(opts.wholeWord ?? false)
+    
     const original = pageNumber
     let firstPageWithMatch: number | null = null
     let total = 0
+    
     for (let p = 1; p <= (numPages || 1); p++) {
       setPageNumber(p)
       const ok = await waitForPageReady()
       if (!ok) continue
-      // After text renders with phrases, count marks
-      const c = pageHandleRef.current?.countMarks?.(phrases, opts) ?? 0
-      total += c
-      if (c && firstPageWithMatch == null) firstPageWithMatch = p
+      
+      // Count matches in text layer
+      const count = pageHandleRef.current?.countMarks?.() ?? 0
+      total += count
+      
+      if (count && firstPageWithMatch == null) {
+        firstPageWithMatch = p
+      }
+      
       await sleep(0)
     }
+    
     if (firstPageWithMatch != null) {
       setPageNumber(firstPageWithMatch)
       setMatchIndex(0)
+      pageHandleRef.current?.setActiveMatch?.(0)
     } else {
       setPageNumber(original)
     }
+    setMatchCount(total)
   }
 
   const authHeaders = () => {
@@ -253,14 +287,20 @@ function PdfRoute() {
 
     try {
       setIsAnalyzing(true)
-      setActivePhrases(phrases)
-      // Recount on current page
+      
+      // Set search phrase for text layer marking
+      setSearchPhrase(phrases.join('|'))
+      setIsAiSearchActive(false) // Manual search
+      
+      // Wait for text layer to render with marks
+      await sleep(100)
+      
       const ok = await waitForPageReady()
       if (ok) {
-        const c = pageHandleRef.current?.countMarks?.() ?? 0
-        setMatchCount(c)
-        setMatchIndex(c ? 0 : -1)
-        if (c) pageHandleRef.current?.setActiveMatch?.(0)
+        const count = pageHandleRef.current?.countMarks?.() ?? 0
+        setMatchCount(count)
+        setMatchIndex(count ? 0 : -1)
+        if (count) pageHandleRef.current?.setActiveMatch?.(0)
       }
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err))
@@ -351,7 +391,7 @@ function PdfRoute() {
       }
       
       // Only get phrase highlights from current page to avoid DOM issues
-      if (activePhrases && activePhrases.length && pageHandleRef.current?.getVisibleMarkRects) {
+      if (searchPhrase && searchPhrase.length >= 2 && pageHandleRef.current?.getVisibleMarkRects) {
         const ext = pageHandleRef.current.getVisibleMarkRectsExt?.()
         if (ext && ext.width && ext.height) {
           const currentPage = pageNumber
@@ -364,21 +404,29 @@ function PdfRoute() {
           }
           
           const rects = (ext.rects || []) as { x: number; y: number; w: number; h: number }[]
+          // Use appropriate color based on search type
+          const highlightColor = isAiSearchActive 
+            ? 'rgba(13,148,136,0.4)' // teal for AI
+            : 'rgba(255,231,115,0.4)' // yellow for manual
           for (const r of rects) {
-            out[currentPage].rects.push({ ...r, color: 'rgba(255,231,115,0.42)' })
+            out[currentPage].rects.push({ ...r, color: highlightColor })
           }
         }
       }
     } else {
       // Single page export - use the reliable method
-      if (activePhrases && activePhrases.length && pageHandleRef.current?.getVisibleMarkRects) {
+      if (searchPhrase && searchPhrase.length >= 2 && pageHandleRef.current?.getVisibleMarkRects) {
         const ext = pageHandleRef.current.getVisibleMarkRectsExt?.()
         const width = ext?.width || 0
         const height = ext?.height || 0
         if (!out[pageNumber]) out[pageNumber] = { width, height, rects: [] }
         
         const rects = (ext?.rects || []) as { x: number; y: number; w: number; h: number }[]
-        for (const r of rects) out[pageNumber].rects.push({ ...r, color: 'rgba(255,231,115,0.42)' })
+        // Use appropriate color based on search type
+        const highlightColor = isAiSearchActive 
+          ? 'rgba(13,148,136,0.4)' // teal for AI
+          : 'rgba(255,231,115,0.4)' // yellow for manual
+        for (const r of rects) out[pageNumber].rects.push({ ...r, color: highlightColor })
       }
       
       // Add manual highlights for current page
@@ -451,11 +499,12 @@ function PdfRoute() {
         // Use full-document worker with pdfjs-dist inside the worker (no UI DOM dependency)
         worker = new Worker(new URL('../workers/pdfExportFull.worker.ts', import.meta.url), { type: 'module' })
         payload = {
-          phrases: activePhrases || [],
+          phrases: searchPhrase ? searchPhrase.split('|') : [],
           searchOptions: { caseSensitive, wholeWord },
           manualHighlights: highlights,
           notesByPage,
           filename: 'document-with-highlights.pdf',
+          isAiSearch: isAiSearchActive,
         }
       } else {
         // Use simple worker for current page only (faster, more reliable)
@@ -545,7 +594,8 @@ function PdfRoute() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full gap-3 p-3">
+    <>
+      <div className="flex flex-col h-full w-full gap-3 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-2">
           <label className="text-sm text-muted-foreground">URL</label>
@@ -590,6 +640,14 @@ function PdfRoute() {
           </Button>
           <Button variant="outline" size="sm" onClick={clearNotes}>
             <Trash2 className="size-4 mr-1" /> Clear Page Notes
+          </Button>
+          <Button 
+            variant={notesOpen ? 'default' : 'outline'} 
+            size="sm" 
+            onClick={() => setNotesOpen(!notesOpen)}
+          >
+            <BookOpen className="size-4 mr-1" /> 
+            Notes ({notes.filter(n => n.page === pageNumber).length})
           </Button>
           <Button variant="default" size="sm" onClick={exportPdfWithHighlights} disabled={isExporting || !source} title="Download PDF with highlights" className="bg-teal-700 text-white hover:bg-teal-600">
             {isExporting ? (
@@ -672,42 +730,149 @@ All pages (phrases + manual highlights + notes)
         </div>
       </div>
 
-      <div ref={viewerRef} className="flex-1 min-h-0 overflow-auto bg-background rounded-md border p-3">
+      <div ref={viewerRef} className="flex-1 min-h-0 bg-background rounded-md border relative overflow-hidden">
         {!source ? (
-          <div className="h-full grid place-items-center text-sm text-muted-foreground">
+          <div className="h-full grid place-items-center text-sm text-muted-foreground p-3">
             Provide a PDF URL or choose a file to begin.
           </div>
         ) : (
-          <Document
-            file={source}
-            onLoadSuccess={onDocumentLoadSuccess as any}
-            onLoadError={onDocumentLoadError as any}
-            loading={<div className="p-6 text-sm text-muted-foreground">Loading PDF…</div>}
-            error={<div className="p-6 text-sm text-red-600">Failed to load PDF.</div>}
-            className="flex justify-center w-full"
-          >
-            <PdfPageWithHighlights
-              ref={pageHandleRef}
-              pageNumber={pageNumber}
-              drawMode={drawMode}
-              zoom={zoom}
-              containerWidth={viewerWidth}
-              highlights={highlights.filter((h) => h.page === pageNumber && h.source !== 'auto')}
-              onAddHighlight={(rect) => addHighlight({ ...rect, page: pageNumber })}
-              onRemoveHighlight={removeHighlight}
-              phrases={activePhrases}
-              searchCaseSensitive={caseSensitive}
-              searchWholeWord={wholeWord}
-              activeMatchIndex={matchIndex}
-              notes={notes.filter((n) => n.page === pageNumber)}
-              onAddNote={(n) => addNote(n)}
-              onUpdateNote={updateNote}
-              onRemoveNote={removeNote}
-            />
-          </Document>
+          <div className="flex h-full">
+            {/* Custom Notes Drawer - contained within viewer */}
+            <div 
+              className={`h-full border-r bg-background transition-all duration-200 flex-shrink-0 ${
+                notesOpen ? 'w-[350px]' : 'w-0'
+              }`}
+            >
+              {notesOpen && (
+                <div className="h-full flex flex-col">
+                  <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+                    <div>
+                      <div className="font-semibold text-sm">Notes</div>
+                      <div className="text-xs text-muted-foreground">Page {pageNumber} • {notes.filter(n => n.page === pageNumber).length} notes</div>
+                    </div>
+                    <Button 
+                      size="sm" 
+                      variant="ghost" 
+                      className="h-7 w-7 p-0" 
+                      onClick={() => setNotesOpen(false)}
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                  
+                  <ScrollArea className="flex-1">
+                    <div className="divide-y">
+                      {notes.filter(n => n.page === pageNumber).length === 0 ? (
+                        <div className="p-4 text-sm text-muted-foreground">
+                          No notes on this page.
+                          <br />
+                          Switch to "Note" mode and click on the PDF to add a note.
+                        </div>
+                      ) : (
+                        notes.filter(n => n.page === pageNumber).map((note) => (
+                          <div
+                            key={note.id}
+                            className="relative group hover:bg-muted/50 transition-colors"
+                            onMouseEnter={() => setHoverNoteId(note.id)}
+                            onMouseLeave={() => setHoverNoteId(null)}
+                          >
+                            {editingNoteId === note.id ? (
+                              <textarea
+                                className="w-full p-3 text-sm bg-transparent resize-none focus:outline-none min-h-[80px]"
+                                defaultValue={note.text}
+                                autoFocus
+                                placeholder="Enter your note..."
+                                onBlur={(e) => {
+                                  updateNote(note.id, e.currentTarget.value || '');
+                                  setEditingNoteId(null);
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Escape') {
+                                    e.preventDefault();
+                                    setEditingNoteId(null);
+                                  }
+                                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                                    e.preventDefault();
+                                    updateNote(note.id, (e.currentTarget as HTMLTextAreaElement).value || '');
+                                    setEditingNoteId(null);
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <div
+                                className="p-3 pr-20 text-sm whitespace-pre-wrap cursor-text min-h-[60px]"
+                                onClick={() => setEditingNoteId(note.id)}
+                              >
+                                {note.text || <span className="text-muted-foreground italic">Click to add note...</span>}
+                              </div>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="absolute top-2 right-2 h-7 w-7 p-0 text-destructive hover:text-destructive opacity-60 hover:opacity-100"
+                              onClick={() => {
+                                // Remove associated highlights
+                                for (const h of highlights) {
+                                  if (h.label === `note:${note.id}`) {
+                                    removeHighlight(h.id);
+                                  }
+                                }
+                                removeNote(note.id);
+                              }}
+                              title="Delete note"
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </ScrollArea>
+                  
+                  <div className="px-4 py-2 border-t bg-muted/20 text-xs text-muted-foreground">
+                    Tip: Use "Note" mode to add notes
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* PDF Document Area */}
+            <div className="flex-1 overflow-auto p-3">
+              <Document
+                file={source}
+                onLoadSuccess={onDocumentLoadSuccess as any}
+                onLoadError={onDocumentLoadError as any}
+                loading={<div className="p-6 text-sm text-muted-foreground">Loading PDF…</div>}
+                error={<div className="p-6 text-sm text-red-600">Failed to load PDF.</div>}
+                className="flex justify-center w-full"
+              >
+                <PdfPageWithHighlights
+                  ref={pageHandleRef}
+                  pageNumber={pageNumber}
+                  drawMode={drawMode}
+                  zoom={zoom}
+                  containerWidth={viewerWidth}
+                  highlights={highlights.filter((h) => h.page === pageNumber && h.source !== 'auto')}
+                  onAddHighlight={(rect) => addHighlight({ ...rect, page: pageNumber })}
+                  onRemoveHighlight={removeHighlight}
+                  searchPhrase={searchPhrase}
+                  searchCaseSensitive={caseSensitive}
+                  searchWholeWord={wholeWord}
+                  activeMatchIndex={matchIndex}
+                  isAiSearchActive={isAiSearchActive}
+                  notes={notes.filter((n) => n.page === pageNumber)}
+                  onAddNote={(n) => { addNote(n); setNotesOpen(true); setEditingNoteId(n.id) }}
+                  onUpdateNote={updateNote}
+                  onRemoveNote={removeNote}
+                  hoverNoteId={hoverNoteId}
+                />
+              </Document>
+            </div>
+          </div>
         )}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -719,14 +884,16 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
   highlights,
   onAddHighlight,
   onRemoveHighlight,
-  phrases,
+  searchPhrase,
   searchCaseSensitive,
   searchWholeWord,
   activeMatchIndex,
+  isAiSearchActive,
   notes,
   onAddNote,
   onUpdateNote,
-  onRemoveNote
+  onRemoveNote,
+  hoverNoteId,
 }: {
   pageNumber: number
   drawMode: DrawMode
@@ -735,14 +902,16 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
   highlights: RectNorm[]
   onAddHighlight: (rect: Omit<RectNorm, 'id' | 'page'> & { page?: number }) => void
   onRemoveHighlight: (id: string) => void
-  phrases: string[]
+  searchPhrase: string
   searchCaseSensitive: boolean
   searchWholeWord: boolean
   activeMatchIndex: number // reserved for active ring styling
+  isAiSearchActive: boolean
   notes: NoteAnn[]
   onAddNote: (n: NoteAnn) => void
   onUpdateNote: (id: string, text: string) => void
   onRemoveNote: (id: string) => void
+  hoverNoteId: string | null
 }, ref: React.Ref<any>) {
   const pageWrapRef = useRef<HTMLDivElement | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
@@ -751,29 +920,63 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
 
   // Drawing state
   const [isDrawing, setIsDrawing] = useState(false)
-  const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
   const startRef = useRef<{ x: number; y: number } | null>(null)
   const [previewRect, setPreviewRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
+ 
+  // Selection-based highlight/annotate state (current page only)
+  const [selRects, setSelRects] = useState<{ x: number; y: number; w: number; h: number }[] | null>(null)
+  const [selToolbarPos, setSelToolbarPos] = useState<{ x: number; y: number } | null>(null)
+
 
   const onMouseDown: React.MouseEventHandler<HTMLDivElement> = (e) => {
+    console.log('onMouseDown called', { drawMode, pageNumber })
+
+    // Ignore interactions that originate inside the selection toolbar or a note editor
+    const target = e.target as HTMLElement
+    if (target && (target.closest('[data-sel-toolbar="1"]') || target.closest('[data-note-editor="1"]'))) {
+      return
+    }
+
     if (drawMode === 'note') {
       const overlay = overlayRef.current
-      if (!overlay) return
+      if (!overlay) {
+        console.warn('Overlay ref not available for note creation')
+        return
+      }
+      // For note placement, prevent text selection and place a note
+      e.preventDefault()
+      e.stopPropagation()
       const rect = overlay.getBoundingClientRect()
       const x = e.clientX - rect.left
       const y = e.clientY - rect.top
       const { clientWidth: W, clientHeight: H } = overlay
+      console.log('Creating note at:', { x, y, W, H, normalizedX: x/W, normalizedY: y/H })
       const id = 'n_' + Math.random().toString(36).slice(2, 9)
       onAddNote({ id, page: pageNumber, x: x / W, y: y / H, text: '' })
-      setEditingNoteId(id)
       return
     }
-    if (drawMode !== 'draw') return
+
+    if (drawMode !== 'draw') {
+      // Allow normal text selection when not drawing
+      return
+    }
+
     const overlay = overlayRef.current
-    if (!overlay) return
+    if (!overlay) {
+      console.warn('Overlay ref not available for drawing')
+      return
+    }
+
     const rect = overlay.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
+
+    // For drawing, prevent default so selection doesn't steal focus
+    e.preventDefault()
+    e.stopPropagation()
+
+    console.log('Starting to draw at:', { x, y, overlayRect: rect })
+
     setIsDrawing(true)
     startRef.current = { x, y }
     setPreviewRect({ x, y, w: 0, h: 0 })
@@ -781,29 +984,59 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
 
   const onMouseMove: React.MouseEventHandler<HTMLDivElement> = (e) => {
     if (!isDrawing) return
+    
+    e.preventDefault()
+    e.stopPropagation()
+    
     const overlay = overlayRef.current
     if (!overlay) return
+    
     const rect = overlay.getBoundingClientRect()
     const x = e.clientX - rect.left
     const y = e.clientY - rect.top
     const s = startRef.current
     if (!s) return
+    
     const left = Math.min(s.x, x)
     const top = Math.min(s.y, y)
     const w = Math.abs(x - s.x)
     const h = Math.abs(y - s.y)
+    
+    // console.log('Drawing preview:', { left, top, w, h })
     setPreviewRect({ x: left, y: top, w, h })
   }
 
   const finishDrawing = (commit: boolean) => {
+    console.log('finishDrawing called with commit:', commit)
+    
     const overlay = overlayRef.current
-    if (!overlay) return
+    if (!overlay) {
+      console.warn('Overlay ref not available when finishing drawing')
+      return
+    }
+    
     const s = startRef.current
     const p = previewRect
+    
+    console.log('Drawing state:', { startRef: s, previewRect: p, isDrawing })
+    
     setIsDrawing(false)
     startRef.current = null
 
-    if (!commit || !s || !p || p.w < 6 || p.h < 6) {
+    if (!commit) {
+      console.log('Drawing cancelled (not committed)')
+      setPreviewRect(null)
+      return
+    }
+    
+    if (!s || !p) {
+      console.warn('Missing start point or preview rect')
+      setPreviewRect(null)
+      return
+    }
+    
+    if (p.w < 3 || p.h < 3) {
+      console.warn(`Rectangle too small: ${p.w}x${p.h} (minimum 3x3)`)
       setPreviewRect(null)
       return
     }
@@ -815,14 +1048,94 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
       y: p.y / H,
       w: p.w / W,
       h: p.h / H,
-      color: 'rgba(255, 231, 115, 0.42)',
+      // color not set; renderer assigns based on source (manual -> blue)
     }
+    
+    console.log('Adding highlight:', rectNorm)
+    console.log('Overlay dimensions:', { W, H })
+    
     onAddHighlight(rectNorm)
     setPreviewRect(null)
   }
 
   const onMouseUp: React.MouseEventHandler<HTMLDivElement> = () => finishDrawing(true)
   const onMouseLeave: React.MouseEventHandler<HTMLDivElement> = () => finishDrawing(false)
+
+  // Compute selection lazily on mouse up within this page only
+  const computeSelectionOnPage = useCallback(() => {
+    try {
+      const pageWrap = pageWrapRef.current
+      if (!pageWrap) return
+      const textLayer = pageWrap.querySelector('.react-pdf__Page__textContent') as HTMLElement | null
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0 || !textLayer) {
+        setSelRects(null)
+        setSelToolbarPos(null)
+        return
+      }
+      const pageRect = pageWrap.getBoundingClientRect()
+      const rects: DOMRect[] = []
+      for (let i = 0; i < sel.rangeCount; i++) {
+        const range = sel.getRangeAt(i)
+        if (textLayer.contains(range.commonAncestorContainer)) {
+          rects.push(...Array.from(range.getClientRects()))
+        }
+      }
+      const pageRects = rects.filter(r => r.width > 0 && r.height > 0)
+      if (!pageRects.length) {
+        setSelRects(null)
+        setSelToolbarPos(null)
+        return
+      }
+      const norm = pageRects.map(r => ({
+        x: (r.left - pageRect.left) / pageRect.width,
+        y: (r.top - pageRect.top) / pageRect.height,
+        w: r.width / pageRect.width,
+        h: r.height / pageRect.height,
+      }))
+      setSelRects(norm)
+      const first = pageRects[0]
+      const x = (first.left - pageRect.left) + first.width / 2
+      const y = (first.top - pageRect.top) - 8
+      setSelToolbarPos({ x, y })
+    } catch (e: any) {
+      console.error(e?.message || 'selection compute failed')
+    }
+  }, [])
+
+  const onPageMouseUp: React.MouseEventHandler<HTMLDivElement> = () => {
+    if (drawMode === 'draw') return
+    // compute after browser paints selection
+    setTimeout(() => computeSelectionOnPage(), 0)
+  }
+
+  const clearSelectionUI = () => {
+    try { window.getSelection()?.removeAllRanges() } catch {}
+    setSelRects(null)
+    setSelToolbarPos(null)
+  }
+
+  const commitSelectionAsHighlight = () => {
+    if (!selRects || selRects.length === 0) return
+    for (const r of selRects) {
+      // No explicit color; renderer will use blue for manual highlights
+      onAddHighlight({ page: pageNumber, x: r.x, y: r.y, w: r.w, h: r.h })
+    }
+    clearSelectionUI()
+  }
+
+  const commitSelectionAsNote = () => {
+    if (!selRects || selRects.length === 0) return
+    const first = selRects[0]
+    const id = 'n_' + Math.random().toString(36).slice(2, 9)
+    // Create the note (managed in side panel)
+    onAddNote({ id, page: pageNumber, x: first.x, y: first.y, text: '' })
+    // Also add visual reference highlights for the selected text segments
+    for (const r of selRects) {
+      onAddHighlight({ page: pageNumber, x: r.x, y: r.y, w: r.w, h: r.h, color: 'rgba(255, 231, 115, 0.42)', label: `note:${id}` })
+    }
+    clearSelectionUI()
+  }
 
   // Expose phrase/match controls to parent via text layer DOM
   useImperativeHandle(ref, () => ({
@@ -840,10 +1153,14 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
       const marks = Array.from(tl.querySelectorAll('mark[data-pdfmark="1"]')) as HTMLElement[]
       marks.forEach((m, i) => {
         if (i === idx) {
-          m.style.outline = '2px solid rgb(13 148 136)'
+          m.style.background = 'rgba(34, 197, 94, 0.4)'
+          m.style.outline = '2px solid rgba(34, 197, 94, 0.6)'
+          m.style.outlineOffset = '1px'
           m.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' })
         } else {
-          m.style.outline = ''
+          m.style.background = 'transparent'
+          m.style.outline = 'none'
+          m.style.outlineOffset = '0'
         }
       })
     },
@@ -984,23 +1301,38 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
 
   // Render manual highlight rectangles
   const renderHighlightDiv = (h: RectNorm) => {
+    const isNoteRef = typeof h.label === 'string' && h.label.startsWith('note:')
+    const isHovered = isNoteRef && hoverNoteId && h.label === `note:${hoverNoteId}`
+
+    // Color mapping - more visible but still allows text to be readable
+    const BLUE = 'rgba(59, 130, 246, 0.3)' // user/manual
+    const TEAL = 'rgba(13, 148, 136, 0.3)' // AI/auto
+    const YELLOW = 'rgba(255, 231, 115, 0.4)' // note refs
+
+    let fill = h.color || BLUE
+    if (h.source === 'auto' && !h.color) fill = TEAL
+    if (isNoteRef && !h.color) fill = YELLOW
+
     return (
       <div
         key={h.id}
         data-hid={h.id}
-        className="absolute rounded-sm"
+        className="absolute"
         style={{
           left: `${h.x * 100}%`,
           top: `${h.y * 100}%`,
           width: `${h.w * 100}%`,
           height: `${h.h * 100}%`,
-          background: h.color || 'rgba(255, 231, 115, 0.42)',
-          outline: '1px solid rgba(180, 140, 0, 0.5)',
-          boxShadow: '0 0 0 1px rgba(180,140,0,0.2) inset',
-          cursor: 'pointer',
+          backgroundColor: fill,
+          border: isHovered ? '2px solid rgba(34, 197, 94, 0.8)' : 'none',
+          boxSizing: 'border-box',
+          cursor: isNoteRef ? 'default' : 'pointer',
+          pointerEvents: isNoteRef ? 'none' : 'auto',
+          mixBlendMode: 'multiply',
         }}
-        title={h.label || 'Click to delete highlight'}
+        title={isNoteRef ? undefined : (h.label || 'Click to delete highlight')}
         onClick={(e) => {
+          if (isNoteRef) return
           e.stopPropagation()
           onRemoveHighlight(h.id)
         }}
@@ -1010,8 +1342,9 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
 
 
   return (
-    <div className="flex justify-center">
-      <div ref={pageWrapRef} className="relative" style={{ width: renderWidth }}>
+    <>
+      <div className="flex justify-center">
+        <div ref={pageWrapRef} className="relative" style={{ width: renderWidth }} onMouseUp={onPageMouseUp}>
         <Page
           pageNumber={pageNumber}
           width={baseWidth}
@@ -1019,80 +1352,125 @@ const PdfPageWithHighlights = forwardRef(function PdfPageWithHighlights({
           devicePixelRatio={typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1}
           renderAnnotationLayer
           renderTextLayer
-          customTextRenderer={({ str }) => {
-            const text = String(str)
-            if (!phrases || phrases.length === 0) return text
-            const escape = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            const parts = phrases.map((p) => (searchWholeWord ? `\\b${escape(p)}\\b` : escape(p)))
-            if (parts.length === 0) return text
-            const flags = searchCaseSensitive ? 'g' : 'gi'
-            const re = new RegExp(`(${parts.join('|')})`, flags)
-            // Visible highlight with invisible text so canvas glyphs show normally
-            return text.replace(re, (m) => `<mark data-pdfmark=\"1\" style=\"background: rgba(255,231,115,0.5); color: transparent; -webkit-text-fill-color: transparent; border-radius: 2px; padding: 0 .04em; margin: 0 -.02em; box-shadow: none;\">${m}</mark>`)
+          customTextRenderer={(props) => {
+            const { str, itemIndex } = props
+            if (!searchPhrase || searchPhrase.length < 2) return str
+            
+            // Escape the search phrase for regex
+            const escapedPhrase = searchPhrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            const regex = new RegExp(`(${escapedPhrase})`, searchCaseSensitive ? 'g' : 'gi')
+            const parts = str.split(regex)
+            
+            return parts
+              .map((part, idx) => {
+                if (regex.test(part)) {
+                  const markIndex = `${pageNumber}_${itemIndex}_${idx}`
+                  const isActive = activeMatchIndex === itemIndex
+                  // Apply visible highlight via mark element - teal for AI, yellow for manual
+                  const bgColor = isActive 
+                    ? 'rgba(34, 197, 94, 0.5)' // green for active
+                    : isAiSearchActive 
+                      ? 'rgba(13, 148, 136, 0.4)' // teal for AI results
+                      : 'rgba(255, 231, 115, 0.4)' // yellow for manual search
+                  return `<mark data-pdfmark="1" data-index="${markIndex}" style="background-color: ${bgColor}; color: inherit; border-radius: 2px;">${part}</mark>`
+                }
+                return part
+              })
+              .join('')
           }}
           onRenderSuccess={() => {
-            // no-op
+            // Page rendered successfully
           }}
-          onLoadError={(err) => console.error(err?.message || String(err))}
+          onLoadError={(err) => {
+            console.error(err?.message || String(err))
+          }}
         />
 
-        {/* Interaction overlay */}
+        {/* Selection toolbar - positioned relative to page, not in overlay */}
+        {selRects && selToolbarPos && (
+          <div
+            data-sel-toolbar="1"
+            className="absolute z-50 rounded-md bg-background border shadow-lg px-2 py-1 flex items-center gap-1"
+            style={{ 
+              left: selToolbarPos.x, 
+              top: selToolbarPos.y, 
+              transform: 'translate(-50%, -100%)',
+              pointerEvents: 'auto'
+            }}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation() }}
+          >
+            <Button 
+              variant="secondary" 
+              size="sm" 
+              className="h-7 px-3 text-xs font-medium" 
+              onClick={commitSelectionAsHighlight}
+            >
+              Highlight
+            </Button>
+            <Button 
+              variant="secondary" 
+              size="sm" 
+              className="h-7 px-3 text-xs font-medium" 
+              onClick={commitSelectionAsNote}
+            >
+              Add Note
+            </Button>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              className="h-7 w-7 p-0" 
+              onClick={clearSelectionUI}
+            >
+              ✕
+            </Button>
+          </div>
+        )}
+
+        {/* Overlays for highlights, notes, and drawing */}
         <div
-          ref={overlayRef}
-          className="absolute inset-0 select-none"
-          style={{ cursor: drawMode === 'draw' ? 'crosshair' : 'grab' }}
-          onMouseDown={onMouseDown}
-          onMouseMove={onMouseMove}
-          onMouseUp={onMouseUp}
-          onMouseLeave={onMouseLeave}
+          ref={overlayRef} 
+          className="absolute inset-0 pointer-events-none"
         >
-          {/* Existing manual highlights */}
-          {highlights
-            .filter((h) => h.page === pageNumber)
-            .map((h) => {
-              // Ensure boxes remain visible after clamping rounding
-              const fix = (v: number) => Math.max(0, Math.min(1, v))
-              return renderHighlightDiv({ ...h, x: fix(h.x), y: fix(h.y), w: fix(h.w), h: fix(h.h) })
-            })}
-
-          {/* Notes */}
-          {notes.map((n) => (
-            <div key={n.id} className="absolute" style={{ left: `${n.x * 100}%`, top: `${n.y * 100}%` }}>
-              <button
-                className="px-1 py-0.5 text-xs rounded bg-yellow-200/80 border border-yellow-400 shadow"
-                onClick={(e) => { e.stopPropagation(); setEditingNoteId(n.id) }}
-                title={n.text || 'Add note'}
-              >
-                🗒️
-              </button>
-              {editingNoteId === n.id && (
-                <div className="absolute z-10 mt-1 w-64 rounded border bg-white shadow p-2">
-                  <textarea defaultValue={n.text} className="w-full h-24 text-sm border rounded p-1" onKeyDown={(e) => { if (e.key === 'Escape') setEditingNoteId(null) }} />
-                  <div className="mt-1 flex items-center gap-2 justify-end">
-                    <Button size="sm" variant="outline" onClick={() => { onRemoveNote(n.id); setEditingNoteId(null) }}>Delete</Button>
-                    <Button size="sm" onClick={(e) => { const ta = (e.currentTarget.parentElement?.previousSibling as HTMLTextAreaElement); onUpdateNote(n.id, ta?.value || ''); setEditingNoteId(null) }}>Save</Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-
-          {/* Preview while drawing */}
+          {/* Drawing preview */}
           {previewRect && (
             <div
-              className="absolute rounded-sm pointer-events-none"
+              className="absolute"
               style={{
                 left: previewRect.x,
                 top: previewRect.y,
                 width: previewRect.w,
                 height: previewRect.h,
-                background: 'rgba(255, 231, 115, 0.25)',
-                outline: '1px dashed rgba(180, 140, 0, 0.8)',
+                background: 'rgba(59, 130, 246, 0.18)', // subtle blue preview
+                outline: '1px dashed rgba(59, 130, 246, 0.8)',
+                borderRadius: 0,
               }}
             />
           )}
+
+          {/* Manual highlights */}
+          {highlights
+            .filter((h) => h.page === pageNumber)
+            .map((h) => {
+              const fix = (v: number) => Math.max(0, Math.min(1, v))
+              return renderHighlightDiv({ ...h, x: fix(h.x), y: fix(h.y), w: fix(h.w), h: fix(h.h) })
+            })}
+
+          {/* Notes on-page anchor visuals intentionally removed (no icons). Notes are managed in the side panel. */}
         </div>
+
+        {/* Drawing interaction layer - only when in draw mode */}
+        {drawMode === 'draw' && (
+          <div
+            className="absolute inset-0"
+            style={{ cursor: 'crosshair', zIndex: 40 }}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={onMouseLeave}
+          />
+        )}
       </div>
     </div>
+    </>
   )
 })
