@@ -441,6 +441,8 @@ function clearSearch() {
         console.error('ai find error', data)
         return
       }
+      // Update input so on-screen rectangles are drawn by the page
+      setPhrasesInput((data.phrases || []).join(', '))
       await findAcrossPages(data.phrases, { caseSensitive: !!data.caseSensitive, wholeWord: !!data.wholeWord })
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err))
@@ -678,9 +680,9 @@ function clearSearch() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full gap-3 p-3">
+    <div className="flex flex-col h-full w-full gap-2">
       {!hideToolbar && (
-        <div className="sticky top-0 z-10 rounded-md border bg-background/95 p-2">
+        <div className="sticky top-0 z-10 rounded-md border bg-background/95 p-3">
           <div className="flex items-center gap-2">
             {showSourceControls && (
               <div className="col-span-1 md:col-span-2 flex items-center gap-2 min-w-0">
@@ -846,7 +848,7 @@ function clearSearch() {
               drawMode={drawMode}
               zoom={zoom}
               containerWidth={viewerWidth}
-              highlights={highlights.filter((h) => h.page === pageNumber && h.source !== 'auto')}
+              highlights={highlights.filter((h) => h.page === pageNumber)}
               onAddHighlight={(rect) => addHighlight({ ...rect, page: pageNumber })}
               onRemoveHighlight={removeHighlight}
               phrases={phrasesInput.split(/[\,\n]/g).map((s) => s.trim()).filter(Boolean)}
@@ -1346,20 +1348,22 @@ const PDFPageWithHighlights = forwardRef(function PDFPageWithHighlights({
     const isNoteRef = typeof h.label === 'string' && h.label.startsWith('note:')
     const isHovered = isNoteRef && hoverNoteId && h.label === `note:${hoverNoteId}`
     const BLUE = 'rgba(59, 130, 246, 0.25)'
+    const TEAL = 'rgba(13, 148, 136, 0.30)'
     const YELLOW = 'rgba(255, 231, 115, 0.42)'
-    const fill = h.color || (isNoteRef ? YELLOW : BLUE)
+    const fill = h.color || (isNoteRef ? YELLOW : (h.source === 'auto' ? TEAL : BLUE))
 
     return (
       <div
         key={h.id}
         data-hid={h.id}
-        className="absolute rounded-sm"
+        className="absolute"
         style={{
           left: `${h.x * 100}%`,
           top: `${h.y * 100}%`,
           width: `${h.w * 100}%`,
           height: `${h.h * 100}%`,
           background: fill,
+          borderRadius: 0,
           outline: isHovered ? '2px solid rgba(34, 197, 94, 0.8)' : '1px solid rgba(59, 130, 246, 0.5)',
           boxShadow: '0 0 0 1px rgba(59, 130, 246, 0.15) inset, 0 2px 4px rgba(59, 130, 246, 0.08)',
           cursor: isNoteRef ? 'default' : 'pointer',
@@ -1424,13 +1428,14 @@ const PDFPageWithHighlights = forwardRef(function PDFPageWithHighlights({
             <div
               key={`srect_${i}`}
               data-search-rect-index={i}
-              className="absolute rounded-sm"
+              className="absolute"
               style={{
                 left: `${r.x * 100}%`,
                 top: `${r.y * 100}%`,
                 width: `${r.w * 100}%`,
                 height: `${r.h * 100}%`,
                 background: 'rgba(34, 197, 94, 0.22)',
+                borderRadius: 0,
                 outline: i === activeMatchIndex ? '2px solid rgba(34, 197, 94, 0.8)' : '1px solid rgba(34, 197, 94, 0.5)',
                 boxShadow: i === activeMatchIndex ? '0 0 0 1px rgba(34, 197, 94, 0.6)' : '0 0 0 1px rgba(34, 197, 94, 0.3) inset',
               }}
@@ -1440,13 +1445,14 @@ const PDFPageWithHighlights = forwardRef(function PDFPageWithHighlights({
           {/* Drawing preview */}
           {previewRect && (
             <div
-              className="absolute rounded-sm pointer-events-none"
+              className="absolute pointer-events-none"
               style={{
                 left: previewRect.x,
                 top: previewRect.y,
                 width: previewRect.w,
                 height: previewRect.h,
                 background: 'rgba(255, 231, 115, 0.25)',
+                borderRadius: 0,
                 outline: '1px dashed rgba(180, 140, 0, 0.8)',
               }}
             />
