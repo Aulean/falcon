@@ -18,6 +18,7 @@ const BACKEND_URL = (import.meta as any).env?.VITE_BACKEND_URL ?? 'http://localh
 // Use the v10 paths:
 import 'react-pdf/dist/Page/TextLayer.css'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
+import PDFViewer from '@/components/pdf/PDFViewer'
 
 // Keep react-pdf Page from re-rendering when only selection UI changes
 // This preserves the browser's native text selection highlight.
@@ -606,286 +607,111 @@ function PdfRoute() {
     }
   }
 
+  // Open notes drawer automatically when new notes are added
+  const prevNotesCount = useRef<number>(0)
+  useEffect(() => {
+    if (notes.length > prevNotesCount.current) setNotesOpen(true)
+    prevNotesCount.current = notes.length
+  }, [notes.length])
+
   return (
-    <>
-      <div className="flex flex-col h-full w-full gap-3 p-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-muted-foreground">URL</label>
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="https://example.com/file.pdf"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              className="w-[360px]"
-            />
-            <Button variant="outline" size="sm" onClick={loadFromUrl}>
-              <LinkIcon className="size-4 mr-1" /> Load URL
-            </Button>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-muted-foreground">File</label>
-          <div className="flex items-center gap-2">
-            <label className="inline-flex items-center gap-2">
-              <input type="file" accept="application/pdf" onChange={handleFileChange} className="hidden" id="pdfFileInput" />
-              <Button asChild variant="outline" size="sm">
-                <label htmlFor="pdfFileInput" className="cursor-pointer inline-flex items-center">
-                  <Upload className="size-4 mr-1" /> Choose
-                </label>
-              </Button>
-            </label>
-          </div>
-        </div>
-        <Separator className="mx-2 h-6" />
-        <div className="flex items-center gap-2">
-          <Button variant={drawMode === 'draw' ? 'default' : 'outline'} size="sm" onClick={() => setDrawMode('draw')}>
-            <MousePointer2 className="size-4 mr-1" /> Draw
-          </Button>
-          <Button variant={drawMode === 'pan' ? 'default' : 'outline'} size="sm" onClick={() => setDrawMode('pan')}>
-            <Hand className="size-4 mr-1" /> Pan
-          </Button>
-          <Button variant={drawMode === 'note' ? 'default' : 'outline'} size="sm" onClick={() => setDrawMode('note')}>
-            <span className="mr-1">🗒️</span> Note
-          </Button>
-          <Button variant="outline" size="sm" onClick={clearHighlights}>
-            <Trash2 className="size-4 mr-1" /> Clear Page Highlights
-          </Button>
-          <Button variant="outline" size="sm" onClick={clearNotes}>
-            <Trash2 className="size-4 mr-1" /> Clear Page Notes
-          </Button>
-          <Button 
-            variant={notesOpen ? 'default' : 'outline'} 
-            size="sm" 
-            onClick={() => setNotesOpen(!notesOpen)}
-          >
-            <BookOpen className="size-4 mr-1" /> 
-            Notes ({notes.filter(n => n.page === pageNumber).length})
-          </Button>
-          <Button variant="default" size="sm" onClick={exportPdfWithHighlights} disabled={isExporting || !source} title="Download PDF with highlights" className="bg-teal-700 text-white hover:bg-teal-600">
-            {isExporting ? (
-              <span className="inline-flex items-center gap-1">
-                <span className="inline-block size-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> 
-                {exportProgress || 'Export'}
-              </span>
-            ) : (
-              <><Download className="size-4 mr-1" /> Download</>
-            )}
-          </Button>
-          <label className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
-            <input type="checkbox" checked={exportAllPages} onChange={(e) => setExportAllPages(e.target.checked)} disabled={isExporting} />
-All pages (phrases + manual highlights + notes)
-          </label>
-        </div>
-        <div className="ml-auto flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-2">
-            <Input
-              placeholder="phrases (comma-separated)"
-              value={phrasesInput}
-              onChange={(e) => setPhrasesInput(e.target.value)}
-              className="w-[280px]"
-            />
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)} />
-              Case
-            </label>
-            <label className="flex items-center gap-1 text-xs text-muted-foreground">
-              <input type="checkbox" checked={wholeWord} onChange={(e) => setWholeWord(e.target.checked)} />
-              Word
-            </label>
-            <Button variant="outline" size="sm" onClick={handleFindPositions} disabled={isAnalyzing || !source} title="Find and highlight matches">
-              <Search className="size-4" />
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleFindWithAI} disabled={!source || isAiLoading} title="Ask AI to find">
-              {isAiLoading ? (
-                <span className="inline-flex items-center gap-1">
-                  <span className="inline-block size-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                  AI
-                </span>
-              ) : (
-                'AI'
-              )}
-            </Button>
-            <div className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
-              <span>{matchCount} found</span>
-              <Button variant="outline" size="sm" disabled={!matchCount} onClick={() => goToMatch(-1)} title="Previous match">
-                <ChevronLeft className="size-4" />
-              </Button>
-              <div className="w-12 text-center">{matchCount ? matchIndex + 1 : 0}/{matchCount}</div>
-              <Button variant="outline" size="sm" disabled={!matchCount} onClick={() => goToMatch(1)} title="Next match">
-                <ChevronRight className="size-4" />
-              </Button>
-            </div>
-          </div>
-          <Button variant="outline" size="sm" onClick={zoomOut} title="Zoom out">
-            <ZoomOut className="size-4" />
-          </Button>
-          <div className="text-xs w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</div>
-          <Button variant="outline" size="sm" onClick={zoomIn} title="Zoom in">
-            <ZoomIn className="size-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={fitWidth} title="Fit width">
-            <Maximize2 className="size-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={actualSize} title="Actual size (A4)">
-            <span className="text-xs font-medium">A4</span>
-          </Button>
-          <Separator className="mx-1 h-6" />
-          <Button variant="outline" size="sm" onClick={goPrev} disabled={pageNumber <= 1}>
-            <ChevronLeft className="size-4" />
-          </Button>
-          <div className="text-sm">
-            Page {pageNumber} / {numPages || 0}
-          </div>
-          <Button variant="outline" size="sm" onClick={goNext} disabled={pageNumber >= (numPages || 1)}>
-            <ChevronRight className="size-4" />
-          </Button>
-        </div>
-      </div>
-
-      <div ref={viewerRef} className="flex-1 min-h-0 bg-background rounded-md border relative overflow-hidden">
-        {!source ? (
-          <div className="h-full grid place-items-center text-sm text-muted-foreground p-3">
-            Provide a PDF URL or choose a file to begin.
-          </div>
-        ) : (
-          <div className="flex h-full">
-            {/* Custom Notes Drawer - contained within viewer */}
-            <div 
-              className={`h-full border-r bg-background transition-all duration-200 flex-shrink-0 ${
-                notesOpen ? 'w-[350px]' : 'w-0'
-              }`}
-            >
-              {notesOpen && (
-                <div className="h-full flex flex-col">
-                  <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
-                    <div>
-                      <div className="font-semibold text-sm">Notes</div>
-                      <div className="text-xs text-muted-foreground">Page {pageNumber} • {notes.filter(n => n.page === pageNumber).length} notes</div>
-                    </div>
-                    <Button 
-                      size="sm" 
-                      variant="ghost" 
-                      className="h-7 w-7 p-0" 
-                      onClick={() => setNotesOpen(false)}
-                    >
-                      <X className="size-4" />
-                    </Button>
-                  </div>
-                  
-                  <ScrollArea className="flex-1">
-                    <div className="divide-y">
-                      {notes.filter(n => n.page === pageNumber).length === 0 ? (
-                        <div className="p-4 text-sm text-muted-foreground">
-                          No notes on this page.
-                          <br />
-                          Switch to "Note" mode and click on the PDF to add a note.
-                        </div>
-                      ) : (
-                        notes.filter(n => n.page === pageNumber).map((note) => (
-                          <div
-                            key={note.id}
-                            className="relative group hover:bg-muted/50 transition-colors"
-                            onMouseEnter={() => setHoverNoteId(note.id)}
-                            onMouseLeave={() => setHoverNoteId(null)}
-                          >
-                            {editingNoteId === note.id ? (
-                              <textarea
-                                className="w-full p-3 text-sm bg-transparent resize-none focus:outline-none min-h-[80px]"
-                                defaultValue={note.text}
-                                autoFocus
-                                placeholder="Enter your note..."
-                                onBlur={(e) => {
-                                  updateNote(note.id, e.currentTarget.value || '');
-                                  setEditingNoteId(null);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Escape') {
-                                    e.preventDefault();
-                                    setEditingNoteId(null);
-                                  }
-                                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                                    e.preventDefault();
-                                    updateNote(note.id, (e.currentTarget as HTMLTextAreaElement).value || '');
-                                    setEditingNoteId(null);
-                                  }
-                                }}
-                              />
-                            ) : (
-                              <div
-                                className="p-3 pr-20 text-sm whitespace-pre-wrap cursor-text min-h-[60px]"
-                                onClick={() => setEditingNoteId(note.id)}
-                              >
-                                {note.text || <span className="text-muted-foreground italic">Click to add note...</span>}
-                              </div>
-                            )}
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="absolute top-2 right-2 h-7 w-7 p-0 text-destructive hover:text-destructive opacity-60 hover:opacity-100"
-                              onClick={() => {
-                                // Remove associated highlights
-                                for (const h of highlights) {
-                                  if (h.label === `note:${note.id}`) {
-                                    removeHighlight(h.id);
-                                  }
-                                }
-                                removeNote(note.id);
-                              }}
-                              title="Delete note"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                  
-                  <div className="px-4 py-2 border-t bg-muted/20 text-xs text-muted-foreground">
-                    Tip: Use "Note" mode to add notes
-                  </div>
+    <div className="h-full w-full p-3">
+      <div className="flex h-full">
+        {/* Notes Drawer (lists all notes across pages) */}
+        <div className={`h-full border-r bg-background transition-all duration-200 flex-shrink-0 ${notesOpen ? 'w-[350px]' : 'w-0'}`}>
+          {notesOpen && (
+            <div className="h-full flex flex-col">
+              <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30">
+                <div>
+                  <div className="font-semibold text-sm">Notes</div>
+                  <div className="text-xs text-muted-foreground">{notes.length} total</div>
                 </div>
-              )}
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setNotes((prev) => prev.filter(n => n.page !== pageNumber))} title="Clear notes on current page">Clear Page</Button>
+                  <Button size="sm" variant="outline" onClick={() => setNotes([])} title="Clear all notes">Clear All</Button>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => setNotesOpen(false)}>×</Button>
+                </div>
+              </div>
+              <ScrollArea className="flex-1">
+                <div className="divide-y">
+                  {notes.length === 0 ? (
+                    <div className="p-4 text-sm text-muted-foreground">No notes yet. Select text and choose "Add Note".</div>
+                  ) : (
+                    notes.map((note) => (
+                      <div
+                        key={note.id}
+                        className="relative group hover:bg-muted/40 transition-colors p-2"
+                        onMouseEnter={() => setHoverNoteId(note.id)}
+                        onMouseLeave={() => setHoverNoteId(null)}
+                      >
+                        <div className="text-[11px] text-muted-foreground mb-1">Page {note.page}</div>
+                        {editingNoteId === note.id ? (
+                          <textarea
+                            className="w-full p-2 text-sm bg-transparent resize-none focus:outline-none min-h-[80px]"
+                            defaultValue={note.text}
+                            autoFocus
+                            placeholder="Enter your note..."
+                            onBlur={(e) => { updateNote(note.id, e.currentTarget.value || ''); setEditingNoteId(null) }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') { e.preventDefault(); setEditingNoteId(null) }
+                              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); updateNote(note.id, (e.currentTarget as HTMLTextAreaElement).value || ''); setEditingNoteId(null) }
+                            }}
+                          />
+                        ) : (
+                          <div className="pr-16 text-sm whitespace-pre-wrap cursor-text min-h-[44px]" onClick={() => setEditingNoteId(note.id)}>
+                            {note.text || <span className="text-muted-foreground italic">Click to add note...</span>}
+                          </div>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="absolute top-2 right-2 h-7 w-7 p-0 text-destructive opacity-60 hover:opacity-100"
+                          onClick={() => removeNote(note.id)}
+                          title="Delete note"
+                        >
+                          ✕
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
             </div>
+          )}
+        </div>
 
-            {/* PDF Document Area */}
-            <div className="flex-1 overflow-auto p-3">
-              <Document
-                file={source}
-                onLoadSuccess={onDocumentLoadSuccess as any}
-                onLoadError={onDocumentLoadError as any}
-                loading={<div className="p-6 text-sm text-muted-foreground">Loading PDF…</div>}
-                error={<div className="p-6 text-sm text-red-600">Failed to load PDF.</div>}
-                className="flex justify-center w-full"
-              >
-                <PdfPageWithHighlights
-                  ref={pageHandleRef}
-                  pageNumber={pageNumber}
-                  drawMode={drawMode}
-                  zoom={zoom}
-                  containerWidth={viewerWidth}
-                  highlights={highlights.filter((h) => h.page === pageNumber && h.source !== 'auto')}
-                  onAddHighlight={(rect) => addHighlight({ ...rect, page: pageNumber })}
-                  onRemoveHighlight={removeHighlight}
-                  searchPhrase={searchPhrase}
-                  searchCaseSensitive={caseSensitive}
-                  searchWholeWord={wholeWord}
-                  activeMatchIndex={matchIndex}
-                  isAiSearchActive={isAiSearchActive}
-                  notes={notes.filter((n) => n.page === pageNumber)}
-                  onAddNote={(n) => { addNote(n); setNotesOpen(true); setEditingNoteId(n.id) }}
-                  onUpdateNote={updateNote}
-                  onRemoveNote={removeNote}
-                  hoverNoteId={hoverNoteId}
-                />
-              </Document>
-            </div>
-          </div>
-        )}
+        {/* Viewer Area with integrated toolbar */}
+        <div className="flex-1 min-h-0">
+            <PDFViewer
+              backendUrl={BACKEND_URL}
+              defaultUrl={DEFAULT_PDF_URL}
+              initialZoom={1}
+              enablePhraseSearch
+              enableAISearch
+              enableExport
+              initialPhrases={phrasesInput}
+              hideToolbar={false}
+              showClearButtons
+              notes={notes}
+              highlights={highlights}
+              hoverNoteId={hoverNoteId}
+              onNotesChange={(ns) => setNotes(ns)}
+              onHighlightsChange={(hs) => setHighlights(hs)}
+              onDocumentLoad={() => { /* no-op */ }}
+              customToolbarItems={(
+                <Button
+                  variant={notesOpen ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setNotesOpen(!notesOpen)}
+                  title="Toggle notes panel"
+                >
+                  <BookOpen className="size-4 mr-1" /> Notes ({notes.length})
+                </Button>
+              )}
+            />
         </div>
       </div>
-    </>
+    </div>
   )
 }
 
